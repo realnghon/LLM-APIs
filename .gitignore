@@ -1,0 +1,8 @@
+# 敏感数据（账号/余量/统计）
+apis-data/
+
+# Node.js
+node_modules/
+
+# 日志
+*.log
