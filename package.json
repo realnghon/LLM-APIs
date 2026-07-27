@@ -19,7 +19,8 @@
     "stop": "node scripts/stop.js",
     "dev": "node --watch APIs.js",
     "test": "node --test test/*.test.js",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "build:offline": "node build-offline-package.js"
   },
   "keywords": [
     "llm",
