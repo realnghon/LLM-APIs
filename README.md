@@ -1,207 +1,190 @@
 # LLM-APIs
 
-极度轻量化的本地大语言模型 API 代理。
+本地运行的轻量级大语言模型 API 代理，提供 OpenAI-compatible 接口、多账号路由、自动故障转移、用量记录和 Web 管理后台。
 
-## 为什么需要这个？
+## 功能
 
-自建 API 代理通常需要部署在服务器上，但：
+- OpenAI-compatible `/v1/*` 和 `/v3/*` 请求转发
+- 多上游账号，按优先级和权重选择
+- 当前账号遇到网络、鉴权、限流或 5xx 错误时自动尝试下一个账号
+- Vercel AI SDK OpenAI-compatible 与 Anthropic provider
+- 独立账号次数、余额或积分配置
+- 使用记录与累计统计
+- 管理后台登录保护
+- JSON 文件持久化，无需数据库
 
-- 免费服务器卡顿、有各种限制
-- 付费服务器有额外成本
-- 需要运维、监控、维护
+池模式、同账号原地重试和多账号共享余额已经移除。
 
-**解决方案**：直接在本地运行，每次开机在终端执行一行命令即可，无需服务器。
+## 要求
 
-## 核心功能
+- Node.js 18 或更高版本
+- npm
 
-### 🚀 轻量级本地运行
-- 单文件架构，一个文件搞定全部功能
-- 零配置，无需 Docker、无需数据库
-- 即开即用，开机运行，关机停止
-
-### 🔄 多账号池化
-- 支持配置多个上游 API 账号（阿里云、DeepSeek、Moonshot 等）
-- 自动轮询 + 权重路由
-- 账号故障自动切换
-- 支持多平台混合使用
-
-### ⚖️ 智能负载均衡
-- 基于优先级 + 权重的路由分配
-- 同一优先级内按权重比例分发
-- 故障自动转移
-
-### 📊 用量监控
-- 实时查看每个 API 账号的使用情况
-- 按时/天/周统计 Token 消耗和成本
-- Web 管理后台，随时关注自己的用量
-
-### ⚡ 高性能
-- TCP/TLS 长连接复用
-- 流式响应（SSE）支持
-- 内存占用极小
-
-## 快速开始
-
-### 方式一：直接运行（推荐）
+## 安装与启动
 
 ```bash
-# 需要 Node.js >= 18
-node APIs.js
-```
-
-### 方式二：npm 安装
-
-```bash
-npm install llm-apis
-npx llm-apis
-```
-
-### 方式三：克隆源码
-
-```bash
-git clone https://github.com/lijinzhao8/LLM-APIs.git
+git clone https://github.com/realnghon/LLM-APIs.git
 cd LLM-APIs
+npm install
+```
+
+首次启动前，从示例创建本地管理员配置：
+
+```bash
+cp config/admin.example.json config/admin.json
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item config/admin.example.json config/admin.json
+```
+
+修改 `config/admin.json` 中的用户名和密码后启动服务：
+
+```bash
 npm start
 ```
 
-启动后：
-- API 地址：`http://localhost:3000`
-- 管理后台：`http://localhost:3000/admin`
-
-## 使用方法
-
-### 1. 配置账号
-
-打开管理后台 `http://localhost:3000/admin`，添加上游 API 账号：
-
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| 名称 | 账号备注 | 阿里云百炼 |
-| 接口地址 | 上游 API Base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| API Key | 你的 API 密钥 | `sk-xxx` |
-| 支持的模型 | 每行一个模型名 | `qwen-max` |
-| 优先级 | 数字越小越优先 | `1` |
-| 权重 | 1-10，越大分配越多 | `5` |
-
-### 2. 调用 API
-
-把客户端的 API 地址改为 `http://localhost:3000/v1`，其他保持不变：
+停止服务（Windows、Linux 和 macOS 使用同一条命令）：
 
 ```bash
-# 使用 curl
+npm run stop
+```
+
+服务启动时会记录当前 PID。若再次启动并遇到端口占用，终端会显示正在运行的服务 PID，并提示执行 `npm run stop`，不会再输出 `EADDRINUSE` 异常堆栈。
+
+启动后：
+
+- API：`http://localhost:3000/v1`
+- 管理后台：`http://localhost:3000/admin`
+- 登录页：`http://localhost:3000/login`
+
+## 管理员登录
+
+管理员凭据位于本地文件 `config/admin.json`：
+
+```json
+{
+  "username": "admin",
+  "password": "your-strong-password"
+}
+```
+
+该文件已被 Git 忽略，不会提交到仓库。可提交的配置模板为 [`config/admin.example.json`](config/admin.example.json)。修改配置后需要重启进程。
+
+> [!WARNING]
+> 公共 API 路由默认不验证客户端身份，且服务允许跨域请求。请仅在可信网络中运行，不要直接暴露到公网。
+
+## 添加上游账号
+
+登录管理后台后打开“账号管理”，选择“新增账号”。
+
+| 字段 | 说明 | 示例 |
+| --- | --- | --- |
+| 账号名称 | 后台显示名称 | 阿里云百炼 |
+| 请求格式 | OpenAI Compatible 或 Anthropic | OpenAI Compatible |
+| Base URL | 上游 API 根地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| API Key | 上游密钥 | `sk-xxx` |
+| 支持模型 | 每行一个模型 | `qwen-max` |
+| 模型映射 | `客户端模型=上游模型`，每行一个 | `gpt-4=qwen-max` |
+| 优先级 | 数字越小越先尝试 | `1` |
+| 权重 | 同优先级账号的选择权重 | `5` |
+| 最大并发 | `0` 表示不限制 | `5` |
+
+每个账号可单独配置次数、余额或积分。账号之间不共享余量。
+
+## 调用示例
+
+```bash
 curl http://localhost:3000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen-max",
     "messages": [{"role": "user", "content": "你好"}]
   }'
+```
 
-# 使用 Python openai SDK
-import openai
-client = openai.OpenAI(base_url="http://localhost:3000/v1", api_key="any")
+Python OpenAI SDK：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:3000/v1",
+    api_key="local",
+)
+
 response = client.chat.completions.create(
     model="qwen-max",
-    messages=[{"role": "user", "content": "你好"}]
+    messages=[{"role": "user", "content": "你好"}],
 )
+print(response.choices[0].message.content)
 ```
 
-### 3. 查看用量
+## 路由策略
 
-管理后台提供完整的统计页面，随时关注自己的 API 使用情况：
+1. 筛选已启用且支持请求模型的账号。
+2. 按优先级从小到大分组。
+3. 同优先级内按权重生成尝试顺序。
+4. 网络错误、`401`、`403`、`408`、`409`、`425`、`429` 或 `5xx` 时尝试下一个账号。
+5. 不在同一个账号上原地重试。
 
-| 页面 | 说明 |
-|------|------|
-| 账号管理 | 查看/编辑/删除账号，实时负载状态 |
-| 使用记录 | 按时间查看每次 API 调用详情 |
-| 累计统计 | 按天/周/总计查看 Token 消耗和成本 |
+## 数据文件
 
-## 工作原理
+账号和用量数据默认保存在：
 
-```
-客户端请求
-    ↓
-LLM-APIs 代理（localhost:3000）
-    ↓ 路由选择（优先级 + 权重）
-    ↓
-上游账号 A / B / C ...
-    ↓
-返回响应给客户端
+```text
+apis-data/kv.json
 ```
 
-### 路由策略
+可通过 `DATA_FILE` 指定其他位置：
 
-1. **优先级**：数字越小越优先（1 > 2 > 3）
-2. **权重**：同一优先级内，按权重比例分配
-3. **故障转移**：账号失败自动切换下一个
-4. **并发控制**：可设置单账号最大并发数
+```bash
+DATA_FILE=/path/to/kv.json npm start
+```
 
-## 配置说明
+Windows PowerShell：
 
-账号和统计信息存储在 `apis-data/kv.json`，可通过管理后台编辑，也可直接修改文件：
-
-```json
-{
-  "accounts": [
-    {
-      "id": "acc_123",
-      "name": "阿里云百炼",
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "sk-xxx",
-      "models": ["qwen-max", "qwen-plus"],
-      "enabled": true,
-      "priority": 1,
-      "weight": 5,
-      "model_map": {}
-    }
-  ]
-}
+```powershell
+$env:DATA_FILE = "D:\llm-apis\kv.json"
+npm start
 ```
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | `3000` | 服务监听端口 |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP 监听端口 |
+| `DATA_FILE` | `apis-data/kv.json` | 数据文件位置 |
+
+## 开发与测试
+
+```bash
+npm test
+npm run test:browser
+npm run dev
+```
+
+测试使用 Node.js 内置测试运行器和 Playwright。HTTP 测试覆盖登录、账号数据迁移、持久化、AI SDK 连通性、Anthropic 适配、跨账号故障转移和用量记录；浏览器测试覆盖登录、新增账号和用量页面。
 
 ## 项目结构
 
-```
+```text
 LLM-APIs/
-├── APIs.js          # 主程序（单文件，无第三方依赖）
-├── package.json     # npm 配置
-├── README.md        # 说明文档
-├── .gitignore       # 忽略规则
-└── apis-data/       # 运行时数据（已 gitignore）
-    └── kv.json      # 账号和统计数据
-```
-
-## 常见问题
-
-### Q: 需要安装什么吗？
-A: 只需要 Node.js >= 18，这是一个纯 Node.js 应用，无其他依赖。
-
-### Q: 支持哪些上游 API？
-A: 支持所有兼容 OpenAI API 格式的服务，包括：
-- OpenAI / Azure OpenAI
-- 阿里云百炼
-- DeepSeek
-- MiniMax
-- Moonshot
-- 其他兼容 OpenAI 格式的 API
-
-### Q: 可以同时配置多个不同平台的账号吗？
-A: 可以。通过池模式（Pool Mode）将不同平台的账号组合成一个逻辑账号，自动查询和故障转移。
-
-### Q: 如何让它开机自动运行？
-A: 建议配合 PM2 使用，只需一次配置即可：
-
-```bash
-npm install -g pm2
-pm2 start APIs.js --name llm-apis
-pm2 save
-pm2 startup
+├── APIs.js                         # 进程启动入口
+├── config/admin.example.json       # 管理员凭据模板
+├── public/admin/                   # 管理后台 HTML、CSS、JS
+├── src/app.js                      # HTTP 路由与适配
+├── src/auth.js                     # 登录会话
+├── src/accounts.js                 # 账号管理
+├── src/proxy.js                    # 多账号路由与故障转移
+├── src/usage.js                    # 用量记录与统计接口
+├── src/storage/                    # JSON 文件仓库
+├── src/upstream/                   # AI SDK provider 适配
+└── test/                           # HTTP 与浏览器测试
 ```
 
 ## License
 
-MIT License
+MIT

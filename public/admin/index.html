@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM-APIs 管理后台</title>
+  <link rel="stylesheet" href="/assets/admin.css">
+  <script src="/assets/lucide.js" defer></script>
+  <script src="/assets/admin.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">LA</span><span>LLM-APIs</span></div>
+      <nav aria-label="管理导航">
+        <button class="nav-item is-active" data-view="accounts"><i data-lucide="users"></i><span>账号管理</span></button>
+        <button class="nav-item" data-view="usage"><i data-lucide="list-checks"></i><span>使用记录</span></button>
+        <button class="nav-item" data-view="stats"><i data-lucide="chart-no-axes-combined"></i><span>累计统计</span></button>
+      </nav>
+      <form class="logout-form" action="/logout" method="post">
+        <button class="nav-item" type="submit"><i data-lucide="log-out"></i><span>退出登录</span></button>
+      </form>
+    </aside>
+
+    <div class="main-column">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menuButton" title="打开导航" aria-label="打开导航"><i data-lucide="menu"></i></button>
+        <div><h1 id="pageTitle">账号管理</h1><p id="pageMeta">0 个上游账号</p></div>
+        <div class="topbar-status"><span class="status-dot"></span>服务运行中</div>
+      </header>
+
+      <main class="workspace">
+        <section class="view is-active" data-view-panel="accounts" aria-labelledby="accountsHeading">
+          <div class="section-toolbar">
+            <h2 id="accountsHeading">账号管理</h2>
+            <button class="button button-primary" id="addAccountButton"><i data-lucide="plus"></i>新增账号</button>
+          </div>
+          <div class="table-shell">
+            <table>
+              <thead><tr><th>账号</th><th>模型</th><th>路由</th><th>并发</th><th>余量</th><th>状态</th><th class="actions-heading">操作</th></tr></thead>
+              <tbody id="accountsBody"></tbody>
+            </table>
+            <div class="empty-state" id="accountsEmpty"><i data-lucide="inbox"></i><strong>暂无账号</strong></div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="usage" aria-labelledby="usageHeading">
+          <div class="section-toolbar">
+            <h2 id="usageHeading">使用记录</h2>
+            <div class="toolbar-actions">
+              <button class="button button-secondary" id="refreshUsageButton"><i data-lucide="refresh-cw"></i>刷新</button>
+              <button class="button button-danger" id="clearUsageButton"><i data-lucide="trash-2"></i>清空</button>
+            </div>
+          </div>
+          <div class="summary-line" data-testid="usage-summary">
+            <span>总记录 <strong id="usageTotal">0</strong></span>
+            <span>成功 <strong class="positive" id="usageSuccess">0</strong></span>
+            <span>失败 <strong class="negative" id="usageFailure">0</strong></span>
+          </div>
+          <div class="table-shell">
+            <table>
+              <thead><tr><th>上游账号</th><th>时间</th><th>耗时</th><th>Tokens</th><th>请求模型</th><th>状态</th></tr></thead>
+              <tbody id="usageBody"></tbody>
+            </table>
+            <div class="empty-state" id="usageEmpty"><i data-lucide="file-clock"></i><strong>暂无使用记录</strong></div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="stats" aria-labelledby="statsHeading">
+          <div class="section-toolbar"><h2 id="statsHeading">累计统计</h2><button class="button button-secondary" id="refreshStatsButton"><i data-lucide="refresh-cw"></i>刷新</button></div>
+          <div class="summary-line stats-summary" id="statsSummary"><span>总调用 <strong>0</strong></span><span>成功 <strong class="positive">0</strong></span><span>失败 <strong class="negative">0</strong></span></div>
+          <div class="split-tables">
+            <section><h3>按账号</h3><div class="table-shell"><table><thead><tr><th>账号</th><th>调用</th><th>输入</th><th>输出</th><th>缓存</th><th>用量</th></tr></thead><tbody id="accountStatsBody"></tbody></table></div></section>
+            <section><h3>按模型</h3><div class="table-shell"><table><thead><tr><th>模型</th><th>调用</th><th>输入</th><th>输出</th><th>缓存</th></tr></thead><tbody id="modelStatsBody"></tbody></table></div></section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+  <dialog class="account-dialog" id="accountDialog" aria-labelledby="accountDialogTitle">
+    <form id="accountForm">
+      <header class="dialog-header">
+        <div><h2 id="accountDialogTitle">新增账号</h2><p id="dialogAccountMeta">配置上游连接</p></div>
+        <button type="button" class="icon-button" id="closeDialogButton" aria-label="关闭" title="关闭"><i data-lucide="x"></i></button>
+      </header>
+      <input type="hidden" id="accountId">
+      <div class="form-tabs" role="tablist" aria-label="账号配置">
+        <button type="button" role="tab" aria-selected="true" data-tab="connection">连接</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="routing">路由</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="allowance">余量</button>
+      </div>
+
+      <div class="tab-panel is-active" data-tab-panel="connection" role="tabpanel">
+        <div class="field-grid two-columns">
+          <label class="field"><span>账号名称</span><input id="accountName" required autocomplete="organization"></label>
+          <label class="field"><span>请求格式</span><select id="accountFormat"><option value="openai">OpenAI Compatible</option><option value="anthropic">Anthropic</option></select></label>
+        </div>
+        <label class="field"><span>Base URL</span><input id="accountUrl" type="url" required autocomplete="url" placeholder="https://api.example.com/v1"></label>
+        <label class="field"><span>API Key</span><span class="input-action"><input id="accountKey" type="password" required autocomplete="off"><button type="button" class="icon-button" id="toggleKeyButton" title="显示 API Key" aria-label="显示 API Key"><i data-lucide="eye"></i></button></span></label>
+        <div class="field-grid two-columns models-grid">
+          <label class="field"><span>支持模型</span><textarea id="accountModels" required placeholder="每行一个模型"></textarea></label>
+          <label class="field"><span>模型映射</span><textarea id="accountModelMap" placeholder="客户端模型=上游模型"></textarea></label>
+        </div>
+        <button type="button" class="button button-secondary" id="fetchModelsButton"><i data-lucide="cloud-download"></i>获取模型</button>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="routing" role="tabpanel" hidden>
+        <div class="field-grid three-columns">
+          <label class="field"><span>优先级</span><input id="accountPriority" type="number" min="1" value="1"></label>
+          <label class="field"><span>权重</span><input id="accountWeight" type="number" min="1" max="10" value="1"></label>
+          <label class="field"><span>最大并发</span><input id="accountConcurrency" type="number" min="0" value="0"></label>
+        </div>
+        <label class="switch-field"><input id="accountEnabled" type="checkbox" checked><span class="switch"></span><span>启用账号</span></label>
+        <label class="field"><span>备注</span><input id="accountNote"></label>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="allowance" role="tabpanel" hidden>
+        <label class="field"><span>余量类型</span><select id="allowanceType"><option value="none">不限制</option><option value="count">按次数</option><option value="usage">按余额</option><option value="points">按积分</option></select></label>
+        <div id="allowanceFields" hidden>
+          <div class="field-grid two-columns">
+            <label class="field"><span>初始总量</span><input id="allowanceTotal" type="number" min="0" step="0.01"></label>
+            <label class="field"><span>到期日</span><input id="allowanceExpiry" type="date"></label>
+          </div>
+          <label class="field"><span>消耗规则</span><textarea id="allowanceRates" placeholder="* input=1 output=4"></textarea></label>
+          <label class="switch-field" id="currencyField"><input id="allowanceCurrency" type="checkbox"><span class="switch"></span><span>以金额显示</span></label>
+        </div>
+      </div>
+
+      <footer class="dialog-footer">
+        <p class="form-error" id="formError" role="alert"></p>
+        <button type="button" class="button button-secondary" id="cancelDialogButton">取消</button>
+        <button type="submit" class="button button-primary" id="saveAccountButton"><i data-lucide="save"></i>保存账号</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

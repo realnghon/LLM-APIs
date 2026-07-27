@@ -1,14 +1,25 @@
 {
-  "name": "@lijinzhao8/llm-apis",
+  "name": "@realnghon/llm-apis",
   "publishConfig": {
     "access": "public"
   },
   "version": "1.0.7",
-  "description": "极度轻量化的本地大语言模型 API 代理。无需服务器，开机即用。支持多账号池化、负载均衡、用量监控。",
+  "description": "轻量级本地大语言模型 API 代理，支持多账号路由、自动故障转移、登录保护和用量监控。",
   "main": "APIs.js",
+  "files": [
+    "APIs.js",
+    "README.md",
+    "config/",
+    "public/",
+    "scripts/",
+    "src/"
+  ],
   "scripts": {
     "start": "node APIs.js",
-    "dev": "node --watch APIs.js"
+    "stop": "node scripts/stop.js",
+    "dev": "node --watch APIs.js",
+    "test": "node --test test/*.test.js",
+    "test:browser": "playwright test"
   },
   "keywords": [
     "llm",
@@ -18,13 +29,23 @@
     "multi-account",
     "local-proxy"
   ],
-  "author": "lijinzhao8",
+  "author": "realnghon",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lijinzhao8/LLM-APIs.git"
+    "url": "git+https://github.com/realnghon/LLM-APIs.git"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.103",
+    "@ai-sdk/openai-compatible": "^2.0.62",
+    "ai": "^6.0.235",
+    "lucide": "^1.27.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
   }
 }

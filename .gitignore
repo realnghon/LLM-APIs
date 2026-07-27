@@ -1,8 +1,26 @@
-# 敏感数据（账号/余量/统计）
+# 本地凭据与敏感数据
+.env
+.env.*
+!.env.example
+config/admin.json
+*.key
+*.pem
 apis-data/
 
 # Node.js
 node_modules/
 
-# 日志
+# 运行状态
+.llm-apis.pid
+
+# 日志与测试产物
 *.log
+test-results/
+playwright-report/
+coverage/
+
+# 操作系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
