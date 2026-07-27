@@ -3,6 +3,18 @@
 function createCoreHandler(accountRepository) {
   return async function handleCore(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/health' && request.method === 'GET') {
+      return Response.json({ status: 'ok', uptime_seconds: Math.floor(process.uptime()) });
+    }
+    if (url.pathname === '/ready' && request.method === 'GET') {
+      try {
+        const accounts = (await accountRepository.list()).filter(account => account.enabled !== false);
+        const models = new Set(accounts.flatMap(account => [...(account.models || []), ...Object.keys(account.model_map || {})]));
+        return Response.json({ status: 'ready', accounts: accounts.length, models: models.size });
+      } catch (error) {
+        return Response.json({ status: 'not_ready', error: error.message }, { status: 503 });
+      }
+    }
     if ((url.pathname === '/v1/models' || url.pathname === '/v3/models') && request.method === 'GET') {
       const accounts = await accountRepository.list();
       const models = [...new Set(accounts

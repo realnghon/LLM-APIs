@@ -4,6 +4,23 @@ const { createOpenAICompatible } = require('@ai-sdk/openai-compatible');
 const { generateText } = require('ai');
 const { proxyAnthropic } = require('./anthropic-client');
 
+async function mapConcurrent(items, maximum, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function runWorker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(items.length, Math.max(1, maximum)) },
+    () => runWorker(),
+  ));
+  return results;
+}
+
 function testItems(account) {
   const items = (account.models || []).map(model => ({ label: `${model}（原始）`, model }));
   for (const [clientModel, upstreamModel] of Object.entries(account.model_map || {})) {
@@ -23,8 +40,7 @@ async function testOpenAIAccount(account, indices) {
     apiKey: account.api_key,
   });
 
-  const results = [];
-  for (const item of selected) {
+  return mapConcurrent(selected, 8, async item => {
     const startedAt = Date.now();
     try {
       await generateText({
@@ -33,26 +49,25 @@ async function testOpenAIAccount(account, indices) {
         maxOutputTokens: 8,
         abortSignal: AbortSignal.timeout(15_000),
       });
-      results.push({
+      return {
         ...item,
         ok: true,
         status: 200,
         latency_ms: Date.now() - startedAt,
         error: '',
         retries: 0,
-      });
+      };
     } catch (error) {
-      results.push({
+      return {
         ...item,
         ok: false,
         status: Number(error.statusCode || error.status || 0),
         latency_ms: Date.now() - startedAt,
         error: error.message || '请求失败',
         retries: 0,
-      });
+      };
     }
-  }
-  return results;
+  });
 }
 
 async function testAnthropicAccount(account, indices) {
@@ -60,8 +75,7 @@ async function testAnthropicAccount(account, indices) {
   const selected = Array.isArray(indices) && indices.length
     ? indices.filter(index => Number.isInteger(index) && allItems[index]).map(index => allItems[index])
     : allItems;
-  const results = [];
-  for (const item of selected) {
+  return mapConcurrent(selected, 8, async item => {
     const startedAt = Date.now();
     try {
       const response = await proxyAnthropic({
@@ -71,12 +85,11 @@ async function testAnthropicAccount(account, indices) {
         upstreamModel: item.model,
       });
       if (!response.ok) throw new Error(`上游返回 ${response.status}`);
-      results.push({ ...item, ok: true, status: 200, latency_ms: Date.now() - startedAt, error: '', retries: 0 });
+      return { ...item, ok: true, status: 200, latency_ms: Date.now() - startedAt, error: '', retries: 0 };
     } catch (error) {
-      results.push({ ...item, ok: false, status: Number(error.statusCode || error.status || 0), latency_ms: Date.now() - startedAt, error: error.message || '请求失败', retries: 0 });
+      return { ...item, ok: false, status: Number(error.statusCode || error.status || 0), latency_ms: Date.now() - startedAt, error: error.message || '请求失败', retries: 0 };
     }
-  }
-  return results;
+  });
 }
 
 async function testAccount(account, indices) {
@@ -85,4 +98,4 @@ async function testAccount(account, indices) {
     : testOpenAIAccount(account, indices);
 }
 
-module.exports = { testAccount, testItems };
+module.exports = { mapConcurrent, testAccount, testItems };

@@ -6,6 +6,7 @@
   <title>LLM-APIs 管理后台</title>
   <link rel="stylesheet" href="/assets/admin.css">
   <script src="/assets/lucide.js" defer></script>
+  <script src="/assets/echarts.js" defer></script>
   <script src="/assets/admin.js" defer></script>
 </head>
 <body>
@@ -13,9 +14,10 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="brand-mark">LA</span><span>LLM-APIs</span></div>
       <nav aria-label="管理导航">
-        <button class="nav-item is-active" data-view="accounts"><i data-lucide="users"></i><span>账号管理</span></button>
-        <button class="nav-item" data-view="usage"><i data-lucide="list-checks"></i><span>使用记录</span></button>
-        <button class="nav-item" data-view="stats"><i data-lucide="chart-no-axes-combined"></i><span>累计统计</span></button>
+        <a class="nav-item is-active" href="/admin/accounts" data-view="accounts"><i data-lucide="users"></i><span>账号管理</span></a>
+        <a class="nav-item" href="/admin/usage" data-view="usage"><i data-lucide="list-checks"></i><span>使用记录</span></a>
+        <a class="nav-item" href="/admin/stats" data-view="stats"><i data-lucide="chart-no-axes-combined"></i><span>累计统计</span></a>
+        <a class="nav-item" href="/admin/status" data-view="status"><i data-lucide="activity"></i><span>运行状态</span></a>
       </nav>
       <form class="logout-form" action="/logout" method="post">
         <button class="nav-item" type="submit"><i data-lucide="log-out"></i><span>退出登录</span></button>
@@ -52,26 +54,82 @@
               <button class="button button-danger" id="clearUsageButton"><i data-lucide="trash-2"></i>清空</button>
             </div>
           </div>
+          <form class="filter-bar" id="usageFilters">
+            <label><span>调用者 IP</span><input id="usageIp" name="client_ip" placeholder="例如 10.0.0.8"></label>
+            <label><span>上游账号筛选</span><select id="usageAccount" name="account_id"><option value="">全部账号</option></select></label>
+            <label><span>模型</span><input id="usageModel" name="model" placeholder="模型名称"></label>
+            <label><span>开始日期</span><input id="usageFrom" name="from" type="date"></label>
+            <label><span>结束日期</span><input id="usageTo" name="to" type="date"></label>
+            <label><span>请求状态</span><select id="usageStatus" name="status"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option></select></label>
+            <div class="filter-actions">
+              <button class="button button-primary" type="submit"><i data-lucide="search"></i>筛选</button>
+              <button class="button button-secondary" type="reset">重置</button>
+            </div>
+          </form>
           <div class="summary-line" data-testid="usage-summary">
             <span>总记录 <strong id="usageTotal">0</strong></span>
             <span>成功 <strong class="positive" id="usageSuccess">0</strong></span>
             <span>失败 <strong class="negative" id="usageFailure">0</strong></span>
           </div>
           <div class="table-shell">
-            <table>
-              <thead><tr><th>上游账号</th><th>时间</th><th>耗时</th><th>Tokens</th><th>请求模型</th><th>状态</th></tr></thead>
+            <table class="usage-table">
+              <thead><tr><th>时间 / 请求</th><th>调用者 IP</th><th>上游账号</th><th>请求 / 上游模型</th><th>输入 / 输出 Tokens</th><th>费用</th><th>耗时</th><th>状态</th></tr></thead>
               <tbody id="usageBody"></tbody>
             </table>
             <div class="empty-state" id="usageEmpty"><i data-lucide="file-clock"></i><strong>暂无使用记录</strong></div>
           </div>
+          <div class="pagination" id="usagePagination">
+            <span id="usagePageMeta">第 1 页</span>
+            <div><button class="icon-button" id="usagePrevious" title="上一页" aria-label="上一页"><i data-lucide="chevron-left"></i></button><button class="icon-button" id="usageNext" title="下一页" aria-label="下一页"><i data-lucide="chevron-right"></i></button></div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="status" aria-labelledby="statusHeading">
+          <div class="section-toolbar">
+            <h2 id="statusHeading">运行状态</h2>
+            <button class="button button-primary" id="runStatusButton"><i data-lucide="play"></i>立即检测</button>
+          </div>
+          <div class="status-controls">
+            <label class="switch-field"><input id="statusEnabled" type="checkbox" aria-label="启用自动检测"><span class="switch"></span><span>自动检测</span></label>
+            <label class="compact-field"><span>检测周期</span><select id="statusInterval" aria-label="检测周期"><option value="1">1 分钟</option><option value="5">5 分钟</option><option value="15">15 分钟</option><option value="30">30 分钟</option><option value="60">1 小时</option></select></label>
+            <label class="compact-field"><span>账号</span><select id="statusAccount" aria-label="状态账号"><option value="">全部账号</option></select></label>
+            <span class="status-last-check" id="statusLastCheck">尚未检测</span>
+          </div>
+          <div class="summary-line" id="statusSummary"><span>监测目标 <strong>0</strong></span><span>正常 <strong class="positive">0</strong></span><span>缓慢 <strong class="warning-text">0</strong></span><span>超时/异常 <strong class="negative">0</strong></span></div>
+          <div class="status-key" aria-label="状态颜色说明"><span><i class="healthy"></i>正常</span><span><i class="warning"></i>缓慢（>5 秒）</span><span><i class="failed"></i>超时 / 异常</span><span><i class="unknown"></i>无数据</span></div>
+          <div class="status-timeline" id="statusTimeline" data-testid="status-timeline">
+            <div id="statusTimelineBody"></div>
+          </div>
         </section>
 
         <section class="view" data-view-panel="stats" aria-labelledby="statsHeading">
-          <div class="section-toolbar"><h2 id="statsHeading">累计统计</h2><button class="button button-secondary" id="refreshStatsButton"><i data-lucide="refresh-cw"></i>刷新</button></div>
-          <div class="summary-line stats-summary" id="statsSummary"><span>总调用 <strong>0</strong></span><span>成功 <strong class="positive">0</strong></span><span>失败 <strong class="negative">0</strong></span></div>
-          <div class="split-tables">
-            <section><h3>按账号</h3><div class="table-shell"><table><thead><tr><th>账号</th><th>调用</th><th>输入</th><th>输出</th><th>缓存</th><th>用量</th></tr></thead><tbody id="accountStatsBody"></tbody></table></div></section>
-            <section><h3>按模型</h3><div class="table-shell"><table><thead><tr><th>模型</th><th>调用</th><th>输入</th><th>输出</th><th>缓存</th></tr></thead><tbody id="modelStatsBody"></tbody></table></div></section>
+          <div class="section-toolbar">
+            <h2 id="statsHeading">累计统计</h2>
+            <div class="toolbar-actions">
+              <div class="segmented" aria-label="统计范围"><button class="is-active" data-stats-range="week">近 7 天</button><button data-stats-range="month">近 30 天</button></div>
+              <button class="button button-secondary" id="refreshStatsButton"><i data-lucide="refresh-cw"></i>刷新</button>
+            </div>
+          </div>
+          <div class="summary-line stats-summary" id="statsSummary"><span>总调用 <strong>0</strong></span><span>成功 <strong class="positive">0</strong></span><span>失败 <strong class="negative">0</strong></span><span>总 Tokens <strong>0</strong></span><span>累计费用 <strong>$0.000000</strong></span></div>
+          <section class="stats-block">
+            <div class="subsection-heading">
+              <h3>调用趋势</h3>
+              <div class="chart-filters">
+                <label><span>上游账号</span><select id="trendAccount" aria-label="趋势账号"><option value="">全部账号</option></select></label>
+                <label><span>模型</span><select id="trendModel" aria-label="趋势模型"><option value="">全部模型</option></select></label>
+                <label><span>分组</span><select id="trendGroup" aria-label="趋势分组"><option value="account">按账号</option><option value="model">按模型</option></select></label>
+                <label><span>指标</span><select id="trendMetric" aria-label="趋势指标"><option value="total_tokens">总 Tokens</option><option value="input">输入 Tokens</option><option value="output">输出 Tokens</option><option value="count">调用次数</option><option value="cost">费用</option></select></label>
+              </div>
+            </div>
+            <div class="usage-chart" id="usageTrendChart" data-testid="usage-trend-chart" aria-label="调用趋势图"></div>
+          </section>
+          <section class="stats-block">
+            <h3>最近 5 小时用量</h3>
+            <div class="table-shell"><table class="stats-data-table"><thead><tr><th>账号</th><th>调用</th><th>输入 Tokens</th><th>输出 Tokens</th><th>缓存 Tokens</th><th>费用</th></tr></thead><tbody id="recentStatsBody"></tbody></table></div>
+          </section>
+          <div class="split-tables stats-block">
+            <section><h3>累计按账号</h3><div class="table-shell"><table class="stats-data-table"><thead><tr><th>账号</th><th>调用</th><th>输入 Tokens</th><th>输出 Tokens</th><th>缓存 Tokens</th><th>费用</th></tr></thead><tbody id="accountStatsBody"></tbody></table></div></section>
+            <section><h3>累计按模型</h3><div class="table-shell"><table class="stats-data-table"><thead><tr><th>模型</th><th>调用</th><th>输入 Tokens</th><th>输出 Tokens</th><th>缓存 Tokens</th><th>费用</th></tr></thead><tbody id="modelStatsBody"></tbody></table></div></section>
           </div>
         </section>
       </main>
@@ -90,6 +148,7 @@
         <button type="button" role="tab" aria-selected="true" data-tab="connection">连接</button>
         <button type="button" role="tab" aria-selected="false" data-tab="routing">路由</button>
         <button type="button" role="tab" aria-selected="false" data-tab="allowance">余量</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="pricing">价格</button>
       </div>
 
       <div class="tab-panel is-active" data-tab-panel="connection" role="tabpanel">
@@ -107,10 +166,11 @@
       </div>
 
       <div class="tab-panel" data-tab-panel="routing" role="tabpanel" hidden>
-        <div class="field-grid three-columns">
+        <div class="field-grid four-columns">
           <label class="field"><span>优先级</span><input id="accountPriority" type="number" min="1" value="1"></label>
           <label class="field"><span>权重</span><input id="accountWeight" type="number" min="1" max="10" value="1"></label>
           <label class="field"><span>最大并发</span><input id="accountConcurrency" type="number" min="0" value="0"></label>
+          <label class="field"><span>请求超时（秒）</span><input id="accountTimeout" type="number" min="1" max="900" value="120"></label>
         </div>
         <label class="switch-field"><input id="accountEnabled" type="checkbox" checked><span class="switch"></span><span>启用账号</span></label>
         <label class="field"><span>备注</span><input id="accountNote"></label>
@@ -128,12 +188,36 @@
         </div>
       </div>
 
+      <div class="tab-panel" data-tab-panel="pricing" role="tabpanel" hidden>
+        <div class="price-header"><span>模型</span><span>输入 $ / 1M Tokens</span><span>输出 $ / 1M Tokens</span></div>
+        <div id="modelPriceFields"></div>
+      </div>
+
       <footer class="dialog-footer">
         <p class="form-error" id="formError" role="alert"></p>
         <button type="button" class="button button-secondary" id="cancelDialogButton">取消</button>
         <button type="submit" class="button button-primary" id="saveAccountButton"><i data-lucide="save"></i>保存账号</button>
       </footer>
     </form>
+  </dialog>
+
+  <dialog class="test-dialog" id="testDialog" aria-labelledby="testDialogTitle">
+    <header class="dialog-header">
+      <div><h2 id="testDialogTitle">模型测活结果</h2><p id="testDialogMeta">逐模型检测</p></div>
+      <button type="button" class="icon-button" id="closeTestDialog" aria-label="关闭测活结果" title="关闭"><i data-lucide="x"></i></button>
+    </header>
+    <div class="test-dialog-toolbar">
+      <div class="test-summary" id="testSummary"><span>选择模型</span></div>
+      <div class="toolbar-actions" id="testSelectionActions">
+        <button class="button button-secondary" type="button" id="selectAllTestModels">全选</button>
+        <button class="button button-secondary" type="button" id="clearTestModels">取消全选</button>
+        <button class="button button-primary" type="button" id="startTestModels"><i data-lucide="play"></i>开始检测</button>
+      </div>
+    </div>
+    <div class="test-results-table">
+      <div class="test-results-head"><span>模型</span><span>状态</span><span>延迟</span><span>结果</span></div>
+      <div id="testResultsBody"></div>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

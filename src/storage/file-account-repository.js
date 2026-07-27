@@ -54,6 +54,8 @@ function quotaFromAccount(account) {
 }
 
 function createFileAccountRepository(dataFile) {
+  let cache = null;
+
   async function readDocument() {
     try {
       return JSON.parse(await fs.readFile(dataFile, 'utf8'));
@@ -94,13 +96,15 @@ function createFileAccountRepository(dataFile) {
       const accounts = await listFrom(document);
       const next = await change(accounts);
       await writeDocument(document, next);
+      cache = next;
     });
   }
 
   return {
     async list() {
       await waitForFile(dataFile);
-      return listFrom(await readDocument());
+      if (!cache) cache = await listFrom(await readDocument());
+      return cache.slice();
     },
     async save(account) {
       await mutate(accounts => {

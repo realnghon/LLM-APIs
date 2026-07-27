@@ -16,6 +16,45 @@ async function login(baseUrl) {
   return response.headers.get('set-cookie').split(';', 1)[0];
 }
 
+test('account connectivity checks configured models concurrently', async t => {
+  let active = 0;
+  let peak = 0;
+  const upstream = http.createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume request */ }
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    active -= 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      id: 'parallel', model: 'model',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+
+  const account = {
+    id: 'parallel', name: 'Parallel', base_url: `http://127.0.0.1:${upstream.address().port}/v1`,
+    api_key: 'key', format: 'openai', models: ['model-a', 'model-b', 'model-c'], enabled: true,
+  };
+  const app = await startTestServer(createHttpHandler({
+    credentials: { username: 'admin', password: 'password' },
+    accountRepository: { list: async () => [account] },
+  }));
+  t.after(app.close);
+  const cookie = await login(app.baseUrl);
+  const response = await fetch(`${app.baseUrl}/admin/accounts/test`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: account.id }),
+  });
+  const body = await response.json();
+  assert.equal(body.results.length, 3);
+  assert.equal(body.results.every(result => result.ok), true);
+  assert.equal(peak, 3);
+});
+
 test('account connectivity check uses the configured OpenAI-compatible model', async t => {
   let requestBody;
   const upstream = http.createServer(async (req, res) => {

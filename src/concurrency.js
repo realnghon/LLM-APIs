@@ -6,10 +6,9 @@ function createConcurrencyLimiter() {
   return {
     acquire(account) {
       const maximum = Math.max(0, Number(account.max_concurrency || 0));
-      if (maximum === 0) return () => {};
       const key = account.id;
       const current = counts.get(key) || 0;
-      if (current >= maximum) return null;
+      if (maximum > 0 && current >= maximum) return null;
       counts.set(key, current + 1);
       let released = false;
       return () => {
@@ -19,33 +18,43 @@ function createConcurrencyLimiter() {
         if (next === 0) counts.delete(key); else counts.set(key, next);
       };
     },
+    active(account) {
+      return counts.get(account.id) || 0;
+    },
   };
 }
 
-function finalizeStream(stream, finalize) {
+function finalizeStream(stream, finalize, observe = () => {}) {
   if (!stream) {
-    finalize();
+    Promise.resolve(finalize()).catch(() => {});
     return null;
   }
   const reader = stream.getReader();
+  let finalized = false;
+  async function finish() {
+    if (finalized) return;
+    finalized = true;
+    await finalize();
+  }
   return new ReadableStream({
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
         if (done) {
-          finalize();
+          await finish();
           controller.close();
         } else {
+          observe(value);
           controller.enqueue(value);
         }
       } catch (error) {
-        finalize();
+        await finish();
         controller.error(error);
       }
     },
     async cancel(reason) {
-      finalize();
       await reader.cancel(reason).catch(() => {});
+      await finish();
     },
   });
 }

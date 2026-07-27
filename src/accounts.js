@@ -16,6 +16,19 @@ function cleanModelMap(value) {
     .filter(([key, model]) => key && model));
 }
 
+function cleanModelPrices(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([model, price]) => {
+    const clean = price && typeof price === 'object' ? price : {};
+    const input = Number(clean.input);
+    const output = Number(clean.output);
+    return [String(model).trim(), {
+      input: Number.isFinite(input) ? Math.max(0, input) : 0,
+      output: Number.isFinite(output) ? Math.max(0, output) : 0,
+    }];
+  }).filter(([model]) => model));
+}
+
 function cleanAllowance(input, existing) {
   if (!input || input.type !== 'total') return null;
   const quotaTotal = Math.max(0, Number(input.quota_total || 0));
@@ -44,9 +57,11 @@ function sanitizeAccount(input, existing = {}) {
       ? [...new Set(input.models.map(model => String(model).trim()).filter(Boolean))]
       : (existing.models || []),
     model_map: input.model_map === undefined ? (existing.model_map || {}) : cleanModelMap(input.model_map),
+    model_prices: input.model_prices === undefined ? (existing.model_prices || {}) : cleanModelPrices(input.model_prices),
     priority: numberInRange(input.priority, existing.priority || 1, 1),
     weight: numberInRange(input.weight, existing.weight || 1, 1, 10),
     max_concurrency: numberInRange(input.max_concurrency, existing.max_concurrency || 0, 0),
+    request_timeout_ms: numberInRange(input.request_timeout_ms, existing.request_timeout_ms || 120_000, 100, 900_000),
     enabled: input.enabled === undefined ? existing.enabled !== false : input.enabled !== false,
     note: String(input.note ?? existing.note ?? '').trim(),
     allowance: Object.prototype.hasOwnProperty.call(input, 'allowance')
@@ -64,7 +79,8 @@ function response(body, status = 200) {
   });
 }
 
-function createAccountsHandler(repository) {
+function createAccountsHandler(repository, options = {}) {
+  const statusRepository = options.statusRepository || null;
   return async function handleAccounts(request) {
     const url = new URL(request.url);
 
@@ -141,6 +157,9 @@ function createAccountsHandler(repository) {
       if (!id) return response({ success: false, error: 'id required' }, 400);
       if (typeof repository.delete !== 'function') return response({ success: false, error: 'Delete is not supported' }, 501);
       await repository.delete(id);
+      if (statusRepository && typeof statusRepository.removeAccountResults === 'function') {
+        await statusRepository.removeAccountResults(id);
+      }
       return response({ success: true });
     }
 

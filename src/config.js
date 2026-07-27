@@ -18,4 +18,9 @@ function loadAdminCredentials(configPath = path.join(__dirname, '..', 'config', 
   }
 }
 
-module.exports = { DEFAULT_CREDENTIALS, loadAdminCredentials };
+function loadServicePort(environment = process.env) {
+  const port = Number(environment.PORT || 8787);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : 8787;
+}
+
+module.exports = { DEFAULT_CREDENTIALS, loadAdminCredentials, loadServicePort };

@@ -2,9 +2,10 @@
 
 const http = require('http');
 const { createHttpHandler } = require('./src/app');
+const { loadServicePort } = require('./src/config');
 const { startServer } = require('./src/server-lifecycle');
 
-const port = Number(process.env.PORT || 3000);
+const port = loadServicePort();
 const server = http.createServer(createHttpHandler());
 
 startServer(server, { port });

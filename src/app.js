@@ -6,9 +6,11 @@ const { renderLoginPage } = require('./admin/login-page');
 const { createAccountsHandler } = require('./accounts');
 const { createProxyHandler } = require('./proxy');
 const { createFileAccountRepository } = require('./storage/file-account-repository');
-const { serveAdminAsset } = require('./admin/static');
+const { isAdminShellPath, serveAdminAsset, serveAdminShell } = require('./admin/static');
 const { createFileUsageRepository } = require('./storage/file-usage-repository');
 const { createMemoryUsageRepository, createUsageHandler } = require('./usage');
+const { createMemoryStatusRepository, createStatusHandler, createStatusMonitor } = require('./status');
+const { createFileStatusRepository } = require('./storage/file-status-repository');
 const { createCoreHandler } = require('./core');
 
 const CORS_HEADERS = {
@@ -54,10 +56,19 @@ function createWebHandler(options = {}) {
   const accountRepository = options.accountRepository || createFileAccountRepository(dataFile);
   const usageRepository = options.usageRepository || (options.accountRepository
     ? createMemoryUsageRepository()
-    : createFileUsageRepository(dataFile));
+    : createFileUsageRepository(dataFile, { retention: options.usageRetention }));
   const appHandler = options.appHandler || createCoreHandler(accountRepository);
-  const accountsHandler = createAccountsHandler(accountRepository);
+  const statusRepository = options.statusRepository || (options.accountRepository
+    ? createMemoryStatusRepository()
+    : createFileStatusRepository(dataFile));
+  const statusMonitor = options.statusMonitor || createStatusMonitor({
+    accountRepository,
+    statusRepository,
+    testAccountFn: options.accountTester,
+  });
+  const accountsHandler = createAccountsHandler(accountRepository, { statusRepository });
   const usageHandler = createUsageHandler(usageRepository);
+  const statusHandler = createStatusHandler(statusMonitor);
   const proxyHandler = createProxyHandler({
     accountRepository,
     usageRepository,
@@ -97,16 +108,21 @@ function createWebHandler(options = {}) {
     }
 
     if (isAdmin && !auth.isAuthenticated(request.headers.get('cookie'))) {
-      if (url.pathname === '/admin' || url.pathname === '/admin/') return redirect('/login');
+      if (isAdminShellPath(url.pathname, request)) return redirect('/login');
       return json({ success: false, error: 'Unauthorized' }, 401);
     }
 
-    if (url.pathname === '/admin' || url.pathname === '/admin/') {
-      return serveAdminAsset(request);
+    if (isAdminShellPath(url.pathname, request)) {
+      return serveAdminShell();
     }
 
     if (accountsHandler) {
       const response = await accountsHandler(request);
+      if (response) return response;
+    }
+
+    if (statusHandler) {
+      const response = await statusHandler(request);
       if (response) return response;
     }
 
@@ -131,6 +147,7 @@ function requestFromNode(req, body) {
   for (const [key, value] of Object.entries(req.headers)) {
     if (value !== undefined) headers[key] = Array.isArray(value) ? value.join(', ') : value;
   }
+  headers['x-llm-remote-address'] = req.socket?.remoteAddress || '';
   return new Request(url, {
     method: req.method,
     headers,

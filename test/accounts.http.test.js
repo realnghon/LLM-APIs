@@ -40,6 +40,10 @@ test('account management discards removed pool and shared allowance settings', a
       base_url: 'https://example.com/v1',
       api_key: 'secret',
       models: ['model-a'],
+      model_prices: {
+        'model-a': { input: 1.5, output: 6 },
+        invalid: { input: -1, output: 'nope' },
+      },
       pool_mode: true,
       pool_mode_retry_count: 5,
       pool_retry_statuses: [401, 429],
@@ -55,6 +59,10 @@ test('account management discards removed pool and shared allowance settings', a
   const body = await response.json();
   assert.equal(body.accounts.length, 1);
   assert.deepEqual(body.accounts[0].models, ['model-a']);
+  assert.deepEqual(body.accounts[0].model_prices, {
+    'model-a': { input: 1.5, output: 6 },
+    invalid: { input: 0, output: 0 },
+  });
   assert.equal(body.accounts[0].pool_mode, undefined);
   assert.equal(body.accounts[0].pool_mode_retry_count, undefined);
   assert.equal(body.accounts[0].pool_retry_statuses, undefined);
