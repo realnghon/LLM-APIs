@@ -188,7 +188,9 @@ function createUsageHandler(repository) {
     }
 
     if (url.pathname === '/admin/usage' && request.method === 'GET') {
-      const allLogs = filterLogs(await repository.list(), url.searchParams);
+      const from = url.searchParams.get('from') || '';
+      const to = endOfDay(url.searchParams.get('to') || '');
+      const allLogs = filterLogs(await repository.list({ from, to }), url.searchParams);
       const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit') || 25)));
       const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
       const logs = allLogs.slice(offset, offset + limit);

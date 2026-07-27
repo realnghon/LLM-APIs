@@ -41,9 +41,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.103",
     "@ai-sdk/openai-compatible": "^2.0.62",
-    "ai": "^6.0.235",
-    "lucide": "^1.27.0",
-    "zod": "^4.4.3"
+    "ai": "^6.0.235"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0"
