@@ -86,7 +86,7 @@ try {
   // 使用 tar 命令直接创建 .tar.gz 文件
   console.log('   正在压缩（这可能需要一些时间）...\n');
   
-  execSync(`tar -czf "${filename}" ${existingFiles.join(' ')}`, {
+  execSync(`tar --exclude=config/admin.json -czf "${filename}" ${existingFiles.join(' ')}`, {
     stdio: 'inherit',
     shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash'
   });

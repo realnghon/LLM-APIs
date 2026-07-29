@@ -57,3 +57,48 @@ test('Anthropic accounts use the official provider behind the OpenAI-compatible 
   assert.equal(upstreamPath, '/v1/messages');
   assert.equal(apiKey, 'anthropic-key');
 });
+
+test('Anthropic accounts receive OpenAI image inputs as multimodal content', async t => {
+  let upstreamBody = null;
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    upstreamBody = JSON.parse(Buffer.concat(chunks).toString());
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      id: 'msg_image', type: 'message', role: 'assistant', model: 'claude-test',
+      content: [{ type: 'text', text: 'image received' }], stop_reason: 'end_turn',
+      usage: { input_tokens: 8, output_tokens: 2 },
+    }));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+
+  const account = {
+    id: 'anthropic-image', name: 'Anthropic Image', format: 'anthropic',
+    base_url: `http://127.0.0.1:${upstream.address().port}/v1`,
+    api_key: 'anthropic-key', models: ['claude-test'], enabled: true,
+  };
+  const app = await startTestServer(createHttpHandler({
+    credentials: { username: 'admin', password: 'password' },
+    accountRepository: { list: async () => [account] },
+  }));
+  t.after(app.close);
+
+  const response = await fetch(`${app.baseUrl}/v1/chat/completions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-test',
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Describe this image.' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+      ] }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(upstreamBody.messages[0].content, [
+    { type: 'text', text: 'Describe this image.' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+  ]);
+});

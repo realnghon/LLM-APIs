@@ -45,6 +45,7 @@ test('proxy times out a stalled account and fails over to the same model on anot
   ];
   const app = await startTestServer(createHttpHandler({
     credentials: { username: 'admin', password: 'password' }, accountRepository: { list: async () => accounts },
+    random: () => 0.5,
   }));
   t.after(app.close);
 
@@ -84,6 +85,7 @@ test('proxy fails over to the next account without retrying the failed account',
   const handler = createHttpHandler({
     credentials: { username: 'admin', password: 'password' },
     accountRepository,
+    random: () => 0.5,
   });
   const app = await startTestServer(handler);
   t.after(app.close);

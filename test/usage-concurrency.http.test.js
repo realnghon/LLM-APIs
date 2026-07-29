@@ -74,6 +74,10 @@ test('concurrent usage records persist across restarts without loss', async t =>
   assert.equal(firstUsage.total, 1005);
   assert.equal(new Set(firstUsage.logs.map(row => row.request_id)).size, 1000);
   assert.equal(upstreamRequests, 1005);
+  const stats = await (await fetch(`${first.baseUrl}/admin/usage/stats?range=week`, { headers: { Cookie: cookie } })).json();
+  assert.equal(stats.cumulative.total_count, 1005);
+  assert.equal(stats.cumulative.total_tokens, 3015);
+  assert.equal(stats.cumulative.byAccount[0].count, 1005);
   await first.close();
 
   second = await startTestServer(createHttpHandler({ credentials, dataFile }));

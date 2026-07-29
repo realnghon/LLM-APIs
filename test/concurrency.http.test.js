@@ -91,7 +91,7 @@ test('concurrency limit sends overlapping requests to the next account', async t
   ];
   const app = await startTestServer(createHttpHandler({
     credentials: { username: 'admin', password: 'password' },
-    accountRepository: { list: async () => accounts },
+    accountRepository: { list: async () => accounts }, random: () => 0.5,
   }));
   t.after(app.close);
 

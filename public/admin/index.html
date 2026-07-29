@@ -40,8 +40,8 @@
             <button class="button button-primary" id="addAccountButton"><i data-lucide="plus"></i>新增账号</button>
           </div>
           <div class="table-shell">
-            <table>
-              <thead><tr><th>账号</th><th>模型</th><th>路由</th><th>并发</th><th>余量</th><th>状态</th><th class="actions-heading">操作</th></tr></thead>
+            <table class="accounts-table">
+              <thead><tr><th>账号</th><th>模型</th><th>并发</th><th>余量</th><th>状态</th><th class="actions-heading">操作</th></tr></thead>
               <tbody id="accountsBody"></tbody>
             </table>
             <div class="empty-state" id="accountsEmpty"><i data-lucide="inbox"></i><strong>暂无账号</strong></div>
@@ -57,7 +57,7 @@
             <label class="switch-field"><input id="apiAuthRequired" type="checkbox" aria-label="强制 API Key 鉴权"><span class="switch"></span><span>强制 API Key 鉴权</span></label>
           </div>
           <div class="table-shell">
-            <table><thead><tr><th>名称</th><th>Key</th><th>可用模型</th><th>到期时间</th><th>状态</th><th class="actions-heading">操作</th></tr></thead><tbody id="apiKeysBody"></tbody></table>
+            <table class="keys-table"><thead><tr><th>名称</th><th>Key</th><th>可用模型</th><th>到期时间</th><th>状态</th><th class="actions-heading">操作</th></tr></thead><tbody id="apiKeysBody"></tbody></table>
             <div class="empty-state" id="apiKeysEmpty"><i data-lucide="key-round"></i><strong>暂无 API Key</strong></div>
           </div>
         </section>
@@ -68,7 +68,7 @@
             <button class="button button-primary" id="addPriceButton"><i data-lucide="plus"></i>新增价格</button>
           </div>
           <div class="table-shell">
-            <table><thead><tr><th>模型</th><th>输入 $ / 1M Tokens</th><th>输出 $ / 1M Tokens</th><th class="actions-heading">操作</th></tr></thead><tbody id="pricingBody"></tbody></table>
+            <table class="pricing-table"><thead><tr><th>模型</th><th>输入 $ / 1M Tokens</th><th>输出 $ / 1M Tokens</th><th class="actions-heading">操作</th></tr></thead><tbody id="pricingBody"></tbody></table>
             <div class="empty-state" id="pricingEmpty"><i data-lucide="badge-dollar-sign"></i><strong>暂无全局价格</strong></div>
           </div>
         </section>
@@ -194,9 +194,8 @@
       </div>
 
       <div class="tab-panel" data-tab-panel="routing" role="tabpanel" hidden>
-        <div class="field-grid four-columns">
-          <label class="field"><span>优先级</span><input id="accountPriority" type="number" min="1" value="1"></label>
-          <label class="field"><span>权重</span><input id="accountWeight" type="number" min="1" max="10" value="1"></label>
+        <p class="field-hint">系统会优先选择当前负载较低的可用账号，并在网络错误、超时或限流时自动切换。</p>
+        <div class="field-grid two-columns">
           <label class="field"><span>最大并发</span><input id="accountConcurrency" type="number" min="0" value="0"></label>
           <label class="field"><span>请求超时（秒）</span><input id="accountTimeout" type="number" min="1" max="900" value="120"></label>
         </div>
@@ -247,6 +246,8 @@
     <form id="priceForm">
       <header class="dialog-header"><div><h2 id="priceDialogTitle">模型价格</h2></div><button type="button" class="icon-button" id="closePriceDialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
       <div class="dialog-content">
+        <p class="field-hint">可以直接选择账号中已配置的模型，也可以在模型框中输入新名称。</p>
+        <label class="field"><span>已配置模型</span><select id="globalPriceModelChoice"><option value="">选择账号中的模型</option></select></label>
         <label class="field"><span>模型</span><input id="globalPriceModel" required></label>
         <div class="field-grid two-columns"><label class="field"><span>输入 $ / 1M Tokens</span><input id="globalPriceInput" type="number" min="0" step="0.000001" required></label><label class="field"><span>输出 $ / 1M Tokens</span><input id="globalPriceOutput" type="number" min="0" step="0.000001" required></label></div>
       </div>

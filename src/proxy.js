@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { clientIp, usageEntry } = require('./usage');
 const { proxyAnthropic } = require('./upstream/anthropic-client');
+const { proxyOpenAI } = require('./upstream/openai-client');
 const { allowanceDebit, hasRemainingAllowance } = require('./allowance');
 const { createConcurrencyLimiter, finalizeStream } = require('./concurrency');
 
@@ -16,34 +17,20 @@ function mappedModel(account, requestedModel) {
     : null;
 }
 
-function weightedOrder(accounts, random = Math.random, active = () => 0) {
+function balancedOrder(accounts, random = Math.random, active = () => 0) {
   return accounts
     .map(account => ({
       account,
-      load: Math.max(0, Number(active(account) || 0)) / Math.max(1, Number(account.weight) || 1),
-      score: Math.log(Math.max(Number.EPSILON, random())) / Math.max(1, Number(account.weight) || 1),
+      load: Math.max(0, Number(active(account) || 0)),
+      score: random(),
     }))
-    .sort((left, right) => left.load - right.load || right.score - left.score)
+    .sort((left, right) => left.load - right.load || left.score - right.score)
     .map(item => item.account);
 }
 
 function orderedCandidates(accounts, model, random, active) {
   const candidates = accounts.filter(account => account.enabled !== false && mappedModel(account, model) !== null);
-  const priorities = [...new Set(candidates.map(account => Math.max(1, Number(account.priority) || 1)))].sort((a, b) => a - b);
-  return priorities.flatMap(priority => weightedOrder(
-    candidates.filter(account => Math.max(1, Number(account.priority) || 1) === priority),
-    random,
-    active,
-  ));
-}
-
-function targetUrl(baseUrl, requestPath) {
-  const base = String(baseUrl || '').replace(/\/+$/, '');
-  if (/\/v\d+$/.test(base) && /^\/v\d+\//.test(requestPath)) {
-    return base.replace(/\/v\d+$/, '') + requestPath;
-  }
-  if (base.endsWith(requestPath)) return base;
-  return base + requestPath;
+  return balancedOrder(candidates, random, active);
 }
 
 function shouldFailOver(status) {
@@ -81,22 +68,6 @@ function createSseUsageObserver(usage, onFirstToken = () => {}) {
   };
 }
 
-function createDeadline(parentSignal, timeoutMs) {
-  const controller = new AbortController();
-  const abort = () => controller.abort(parentSignal?.reason);
-  if (parentSignal?.aborted) abort();
-  else parentSignal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error('upstream request timeout')), Math.max(1, Number(timeoutMs || 120_000)));
-  timer.unref?.();
-  return {
-    signal: controller.signal,
-    cleanup() {
-      clearTimeout(timer);
-      parentSignal?.removeEventListener('abort', abort);
-    },
-  };
-}
-
 function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUpstream = fetch, random = Math.random }) {
   const concurrency = createConcurrencyLimiter();
   return async function handleProxy(request) {
@@ -131,7 +102,7 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
 
     let body;
     try {
-      body = await request.json();
+      body = request.parsedBody || await request.json();
     } catch {
       await record({ status: 400, error: 'Invalid JSON' });
       return Response.json({ error: { message: 'Invalid JSON' } }, { status: 400 });
@@ -184,20 +155,16 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         continue;
       }
       const startedAt = Date.now();
-      const deadline = account.format === 'anthropic' ? null : createDeadline(request.signal, account.request_timeout_ms);
+      let deadline = null;
       try {
-        const response = account.format === 'anthropic'
-          ? await proxyAnthropic({ account, body: upstreamBody, requestedModel: model, upstreamModel, signal: request.signal })
-          : await fetchUpstream(targetUrl(account.base_url, url.pathname), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${account.api_key}`,
-            },
-            body: JSON.stringify(upstreamBody),
-            signal: deadline.signal,
-          });
-        if (body.stream !== true && firstTokenMs === null) firstTokenMs = Date.now() - requestStartedAt;
+        let response;
+        if (account.format === 'anthropic') {
+          response = await proxyAnthropic({ account, body: upstreamBody, requestedModel: model, upstreamModel, signal: request.signal });
+        } else {
+          const upstream = proxyOpenAI({ account, body: upstreamBody, requestPath: url.pathname, signal: request.signal, fetch: fetchUpstream });
+          deadline = upstream.deadline;
+          response = await upstream.response;
+        }
         const headers = responseHeaders(response.headers, {
           'X-Upstream-Account': account.name || account.id,
           'X-Upstream-Time': `${Date.now() - startedAt}ms`,

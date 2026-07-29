@@ -3,13 +3,14 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "轻量级本地大语言模型 API 网关，支持多账号路由、API Key、SQLite 持久化和用量监控。",
   "main": "APIs.js",
   "files": [
     "APIs.js",
     "README.md",
-    "config/",
+    "config/admin.example.json",
+    "config/service.json",
     "public/",
     "scripts/",
     "src/"

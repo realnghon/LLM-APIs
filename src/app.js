@@ -5,12 +5,9 @@ const { loadAdminCredentials } = require('./config');
 const { renderLoginPage } = require('./admin/login-page');
 const { createAccountsHandler } = require('./accounts');
 const { createProxyHandler } = require('./proxy');
-const { createFileAccountRepository } = require('./storage/file-account-repository');
 const { isAdminShellPath, serveAdminAsset, serveAdminShell } = require('./admin/static');
-const { createFileUsageRepository } = require('./storage/file-usage-repository');
 const { createMemoryUsageRepository, createUsageHandler } = require('./usage');
 const { createMemoryStatusRepository, createStatusHandler, createStatusMonitor } = require('./status');
-const { createFileStatusRepository } = require('./storage/file-status-repository');
 const { createCoreHandler } = require('./core');
 const { createSqliteStore } = require('./storage/sqlite-store');
 const { bearerToken, createApiKeyRepository, createApiKeysHandler } = require('./api-keys');
@@ -59,14 +56,11 @@ function createWebHandler(options = {}) {
   const auth = createAuth(options.credentials || loadAdminCredentials(options.configPath));
   const dataFile = options.dataFile || process.env.DATA_FILE || require('path').join(__dirname, '..', 'apis-data', 'kv.json');
   const store = options.store || (!options.accountRepository ? createSqliteStore(dataFile, options) : null);
-  const accountRepository = options.accountRepository || store?.accountRepository || createFileAccountRepository(dataFile);
-  const usageRepository = options.usageRepository || store?.usageRepository || (options.accountRepository
-    ? createMemoryUsageRepository()
-    : createFileUsageRepository(dataFile, { retention: options.usageRetention }));
+  const accountRepository = options.accountRepository || store?.accountRepository;
+  if (!accountRepository) throw new Error('An account repository or complete SQLite store is required');
+  const usageRepository = options.usageRepository || store?.usageRepository || createMemoryUsageRepository();
   const appHandler = options.appHandler || createCoreHandler(accountRepository);
-  const statusRepository = options.statusRepository || store?.statusRepository || (options.accountRepository
-    ? createMemoryStatusRepository()
-    : createFileStatusRepository(dataFile));
+  const statusRepository = options.statusRepository || store?.statusRepository || createMemoryStatusRepository();
   const statusMonitor = options.statusMonitor || createStatusMonitor({
     accountRepository,
     statusRepository,
@@ -106,11 +100,11 @@ function createWebHandler(options = {}) {
         request.apiKey = null;
       } else {
         const allowedModels = key.models || [];
-        if (request.method === 'POST' && allowedModels.length) {
+        if (request.method === 'POST') {
           const clone = request.clone();
-          let model = '';
-          try { model = String((await clone.json()).model || ''); } catch {}
-          if (model && !allowedModels.some(item => item.toLowerCase() === model.toLowerCase())) {
+          try { request.parsedBody = await clone.json(); } catch {}
+          const model = String(request.parsedBody?.model || '');
+          if (allowedModels.length && model && !allowedModels.some(item => item.toLowerCase() === model.toLowerCase())) {
             return withCors(Response.json({ error: { message: `Model '${model}' is not allowed for this API key` } }, { status: 403 }));
           }
         }

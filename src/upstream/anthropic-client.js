@@ -4,21 +4,39 @@ const crypto = require('crypto');
 const { createAnthropic } = require('@ai-sdk/anthropic');
 const { generateText, streamText } = require('ai');
 
+function textForSdk(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return JSON.stringify(content ?? '');
+  return content.map(part => part?.type === 'text' && typeof part.text === 'string'
+    ? part.text
+    : JSON.stringify(part ?? '')).join('');
+}
+
+function contentForSdk(message) {
+  if (message.role !== 'user' || !Array.isArray(message.content)) return textForSdk(message.content);
+  return message.content.map(part => {
+    if (part?.type === 'text' && typeof part.text === 'string') return { type: 'text', text: part.text };
+    if (part?.type === 'image_url') {
+      const image = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+      if (typeof image === 'string' && image) return { type: 'image', image };
+    }
+    return { type: 'text', text: JSON.stringify(part ?? '') };
+  });
+}
+
 function messagesForSdk(messages) {
   return (messages || [])
     .filter(message => message.role !== 'system')
     .map(message => ({
       role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: typeof message.content === 'string'
-        ? message.content
-        : JSON.stringify(message.content ?? ''),
+      content: contentForSdk(message),
     }));
 }
 
 function systemForSdk(messages) {
   return (messages || [])
     .filter(message => message.role === 'system')
-    .map(message => typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''))
+    .map(message => textForSdk(message.content))
     .join('\n');
 }
 

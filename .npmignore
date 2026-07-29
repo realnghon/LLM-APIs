@@ -1,0 +1,8 @@
+config/admin.json
+apis-data/
+test-results/
+playwright-report/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

@@ -6,7 +6,7 @@
 
 - 最低运行版本升级为 Node.js 22.13。
 - 默认端口由 `8787` 改为 `8586`，运行参数集中在 `config/service.json`。
-- 首次启动自动将旧 JSON、NDJSON 和状态文件导入 SQLite，原文件会保留。
+- 首次启动自动将旧 JSON、NDJSON 和状态文件导入 SQLite，之后仅使用 SQLite，原文件会保留。
 - 启动前必须创建 `config/admin.json`，或设置 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`。
 - 客户端 Key 默认由管理员创建后手动开启强制鉴权，便于现有部署平滑升级。
 
@@ -72,8 +72,6 @@ npm start
 - **API Key**：上游密钥
 - **支持模型**：每行一个模型名
 - **模型映射**：可选，格式 `客户端模型=上游模型`
-- **优先级**：数字越小越优先
-- **权重**：同优先级账号的负载分配权重
 - **最大并发**：0 表示不限制
 - **请求超时**：超时后自动尝试下一账号（秒）
 - **模型价格**：在“模型价格”页面统一维护；账号仅在渠道价格不同时设置覆盖值
@@ -97,10 +95,10 @@ print(response.choices[0].message.content)
 
 ## 核心功能
 
-- **多账号路由**：按优先级、权重和负载自动选择账号
+- **自动负载均衡**：优先选择当前负载较低的可用账号，无需配置优先级或权重
 - **自动故障转移**：网络错误、超时、限流时自动切换下一账号
+- **多模态输入**：OpenAI Compatible 透明转发图片输入，Anthropic 自动转换 `image_url`
 - **用量统计**：记录每次请求的 Tokens、费用、耗时和状态
-- **按月归档**：历史记录自动按月归档，无记录数量限制
 - **API Key**：创建下游 Key、限制可用模型，并按 Key 追踪用量
 - **SQLite 持久化**：首次启动自动创建数据库，并自动导入旧 JSON/NDJSON 数据
 - **健康监测**：定时检测账号和模型可用性
@@ -127,20 +125,20 @@ print(response.choices[0].message.content)
 
 - `PORT`：HTTP 监听端口（默认 8586）
 - `HOST`：监听地址（默认 `127.0.0.1`；局域网访问可设为 `0.0.0.0`）
-- `DATA_FILE`：数据文件路径（默认 `apis-data/kv.json`）
+- `DATA_FILE`：旧数据导入源，同时用于推导默认 SQLite 文件名（默认 `apis-data/kv.json`）
 - `DATABASE_FILE`：SQLite 文件路径（默认与 `DATA_FILE` 同目录、同名 `.sqlite`）
 - `MAX_REQUEST_BODY_BYTES`：最大请求体字节数（默认 10 MiB）
 - `LOG_LEVEL`：日志等级（`debug`、`info`、`warn`、`error`，默认 `info`）
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD`：可替代 `config/admin.json` 提供管理员凭据
 
-**数据文件**：
+**旧数据迁移文件**：
 
 - `apis-data/kv.json`：账号配置
 - `apis-data/kv.usage.ndjson`：当前月用量记录
 - `apis-data/kv.usage-YYYY-MM.ndjson`：历史归档
 - `apis-data/kv.status.json`：健康检查状态
 
-升级后以 `apis-data/kv.sqlite` 为主存储。第一次启动会自动导入以上旧文件，旧文件不会自动删除。
+运行时唯一存储为 `apis-data/kv.sqlite`。第一次启动会自动导入以上旧文件，旧文件不会自动删除，也不会继续写入。
 
 ## API Key
 

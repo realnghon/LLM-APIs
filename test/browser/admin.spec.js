@@ -25,6 +25,11 @@ test('admin can log in and open the streamlined account editor', async ({ page }
   await expect(editor.getByRole('tab', { name: '价格' })).toBeVisible();
   await expect(editor.getByText('池模式')).toHaveCount(0);
   await expect(editor.getByText('共享余额')).toHaveCount(0);
+  await expect(editor.getByLabel('优先级')).toHaveCount(0);
+  await expect(editor.getByLabel('权重')).toHaveCount(0);
+  await editor.getByRole('tab', { name: '路由' }).click();
+  await expect(editor.getByText('系统会优先选择当前负载较低的可用账号，并在网络错误、超时或限流时自动切换。')).toBeVisible();
+  await editor.getByRole('tab', { name: '连接' }).click();
 
   await editor.getByLabel('账号名称').fill('Browser Account');
   await editor.getByLabel('Base URL').fill('https://example.com/v1');
@@ -278,11 +283,17 @@ test('API key and global pricing pages support the lightweight workflow', async 
   await page.getByLabel('用户名').fill('admin');
   await page.getByLabel('密码').fill('password');
   await page.getByRole('button', { name: '登录' }).click();
+  await page.request.post('/admin/accounts', { data: {
+    name: 'Pricing Source', base_url: 'https://example.com/v1', api_key: 'key', models: ['configured-model'],
+  } });
   await page.locator('[data-view="pricing"]').click();
   await expect(page).toHaveURL(/\/admin\/pricing$/);
   await page.getByRole('button', { name: '新增价格' }).click();
   const priceDialog = page.getByRole('dialog', { name: '模型价格' });
-  await priceDialog.getByLabel('模型').fill('shared-model');
+  await expect(priceDialog.getByLabel('已配置模型')).toContainText('configured-model');
+  await priceDialog.getByLabel('已配置模型').selectOption('configured-model');
+  await expect(priceDialog.getByLabel('模型', { exact: true })).toHaveValue('configured-model');
+  await priceDialog.getByLabel('模型', { exact: true }).fill('shared-model');
   await priceDialog.getByLabel('输入 $ / 1M Tokens').fill('1.25');
   await priceDialog.getByLabel('输出 $ / 1M Tokens').fill('5');
   await priceDialog.getByRole('button', { name: '保存' }).click();

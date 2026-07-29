@@ -11,9 +11,11 @@ function createPricingHandler(repository, accountRepository) {
     if (request.method === 'GET') {
       const prices = await repository.list();
       const accounts = await accountRepository.list();
-      const models = [...new Set(accounts.flatMap(account => [
+      const configuredModels = accounts.flatMap(account => [
         ...(account.models || []), ...Object.values(account.model_map || {}),
-      ]))].sort((a, b) => a.localeCompare(b));
+      ]);
+      const models = [...new Map(configuredModels.map(model => [String(model).toLowerCase(), String(model)])).values()]
+        .sort((a, b) => a.localeCompare(b));
       return response({ success: true, prices, models });
     }
     if (request.method === 'POST') {

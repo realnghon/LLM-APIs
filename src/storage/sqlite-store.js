@@ -188,6 +188,11 @@ function createSqliteStore(dataFile, options = {}) {
   let closed = false;
   createSchema(db);
   migrateLegacy(db, dataFile);
+  let accountSnapshot = null;
+
+  function invalidateAccounts() {
+    accountSnapshot = null;
+  }
 
   function pricesObject() {
     return Object.fromEntries(db.prepare('SELECT model, input_price, output_price FROM model_prices ORDER BY model COLLATE NOCASE').all()
@@ -196,12 +201,14 @@ function createSqliteStore(dataFile, options = {}) {
 
   const accountRepository = {
     async list() {
+      if (accountSnapshot) return accountSnapshot.slice();
       const globalPrices = pricesObject();
-      return db.prepare('SELECT data FROM accounts ORDER BY position, rowid').all().map(row => {
+      accountSnapshot = db.prepare('SELECT data FROM accounts ORDER BY position, rowid').all().map(row => {
         const account = parsed(row.data, {});
         const overrides = account.model_price_overrides || {};
         return { ...account, model_price_overrides: overrides, model_prices: { ...globalPrices, ...overrides } };
       });
+      return accountSnapshot.slice();
     },
     async save(account) {
       const now = account.updated_at || new Date().toISOString();
@@ -218,14 +225,19 @@ function createSqliteStore(dataFile, options = {}) {
       db.prepare(`INSERT INTO accounts(id, position, data, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`)
         .run(account.id, existing ? existing.position : Number(maximum) + 1, json(clean, {}), now);
+      invalidateAccounts();
       return account;
     },
-    async delete(id) { db.prepare('DELETE FROM accounts WHERE id = ?').run(id); },
+    async delete(id) {
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
+      invalidateAccounts();
+    },
     async reorder(ids) {
       transaction(db, () => {
         const update = db.prepare('UPDATE accounts SET position = ? WHERE id = ?');
         ids.forEach((id, index) => update.run(index, id));
       });
+      invalidateAccounts();
     },
     async debitAllowance(id, amount) {
       transaction(db, () => {
@@ -238,6 +250,7 @@ function createSqliteStore(dataFile, options = {}) {
         account.updated_at = new Date().toISOString();
         db.prepare('UPDATE accounts SET data = ?, updated_at = ? WHERE id = ?').run(json(account), account.updated_at, id);
       });
+      invalidateAccounts();
     },
     async reserveCountAllowance(id) {
       return transaction(db, () => {
@@ -251,6 +264,7 @@ function createSqliteStore(dataFile, options = {}) {
         if (!(current > 0)) return false;
         allowance.remaining = current - 1;
         db.prepare('UPDATE accounts SET data = ?, updated_at = ? WHERE id = ?').run(json(account), new Date().toISOString(), id);
+        invalidateAccounts();
         return true;
       });
     },
@@ -264,6 +278,7 @@ function createSqliteStore(dataFile, options = {}) {
         allowance.remaining = Math.min(Number(allowance.quota_total || Infinity), Number(allowance.remaining || 0) + 1);
         db.prepare('UPDATE accounts SET data = ?, updated_at = ? WHERE id = ?').run(json(account), new Date().toISOString(), id);
       });
+      invalidateAccounts();
     },
   };
 
@@ -274,8 +289,12 @@ function createSqliteStore(dataFile, options = {}) {
       db.prepare(`INSERT INTO model_prices(model, input_price, output_price, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(model) DO UPDATE SET input_price = excluded.input_price, output_price = excluded.output_price, updated_at = excluded.updated_at`)
         .run(name, Math.max(0, Number(price.input || 0)), Math.max(0, Number(price.output || 0)), new Date().toISOString());
+      invalidateAccounts();
     },
-    async delete(model) { db.prepare('DELETE FROM model_prices WHERE model = ? COLLATE NOCASE').run(model); },
+    async delete(model) {
+      db.prepare('DELETE FROM model_prices WHERE model = ? COLLATE NOCASE').run(model);
+      invalidateAccounts();
+    },
   };
 
   const usageColumns = `id, request_id, account_id, account_name, api_key_id, api_key_name, api_key_prefix,
@@ -283,6 +302,77 @@ function createSqliteStore(dataFile, options = {}) {
     input_tokens, output_tokens, total_tokens, cache_tokens, cache_create_tokens, consumed, cost, attempts, error, created_at`;
   function usageRow(row) {
     return row ? { ...row, stream: row.stream === 1, attempts: parsed(row.attempts, []) } : row;
+  }
+  function statsSummary(where = '', parameters = []) {
+    const totals = db.prepare(`SELECT COUNT(*) AS total_count,
+      SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS success_count,
+      COALESCE(SUM(input_tokens), 0) AS total_input, COALESCE(SUM(output_tokens), 0) AS total_output,
+      COALESCE(SUM(cost), 0) AS total_cost FROM usage_logs${where}`).get(...parameters);
+    const grouped = column => db.prepare(`SELECT ${column} AS name, COUNT(*) AS count,
+      COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(output_tokens), 0) AS output,
+      COALESCE(SUM(cache_tokens), 0) AS cache, COALESCE(SUM(cache_create_tokens), 0) AS cache_create,
+      COALESCE(SUM(consumed), 0) AS consumed, COALESCE(SUM(cost), 0) AS cost
+      FROM usage_logs${where}${where ? ' AND' : ' WHERE'} ${column} != '' GROUP BY ${column}`).all(...parameters);
+    const totalCount = Number(totals.total_count || 0);
+    const successCount = Number(totals.success_count || 0);
+    const totalInput = Number(totals.total_input || 0);
+    const totalOutput = Number(totals.total_output || 0);
+    return {
+      total_count: totalCount,
+      success_count: successCount,
+      fail_count: totalCount - successCount,
+      total_input: totalInput,
+      total_output: totalOutput,
+      total_tokens: totalInput + totalOutput,
+      total_cost: Number(Number(totals.total_cost || 0).toFixed(12)),
+      byAccount: grouped('account_name'),
+      byModel: grouped('requested_model'),
+    };
+  }
+
+  function usageStats(range = 'week', now = new Date()) {
+    const current = now instanceof Date ? now : new Date(now);
+    const today = current.toISOString().slice(0, 10);
+    const recentStart = new Date(current.getTime() - 5 * 60 * 60_000).toISOString();
+    const days = range === 'month' ? 30 : 7;
+    const trendStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate() - days + 1));
+    const trendRows = db.prepare(`SELECT substr(created_at, 1, 10) AS day, account_name, requested_model,
+      COUNT(*) AS count, COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(output_tokens), 0) AS output,
+      COALESCE(SUM(cost), 0) AS cost FROM usage_logs
+      WHERE created_at >= ? AND created_at <= ? GROUP BY day, account_name, requested_model`)
+      .all(trendStart.toISOString(), current.toISOString());
+    const buckets = [];
+    for (let index = 0; index < days; index += 1) {
+      const date = new Date(trendStart);
+      date.setUTCDate(trendStart.getUTCDate() + index);
+      const key = date.toISOString().slice(0, 10);
+      const rows = trendRows.filter(row => row.day === key);
+      const byAccount = new Map();
+      for (const row of rows) {
+        if (!row.account_name) continue;
+        const item = byAccount.get(row.account_name) || { name: row.account_name, count: 0, input: 0, output: 0, cache: 0, cache_create: 0, consumed: 0, cost: 0 };
+        for (const field of ['count', 'input', 'output', 'cost']) item[field] += Number(row[field] || 0);
+        byAccount.set(row.account_name, item);
+      }
+      buckets.push({
+        key,
+        count: rows.reduce((sum, row) => sum + Number(row.count || 0), 0),
+        input: rows.reduce((sum, row) => sum + Number(row.input || 0), 0),
+        output: rows.reduce((sum, row) => sum + Number(row.output || 0), 0),
+        cost: Number(rows.reduce((sum, row) => sum + Number(row.cost || 0), 0).toFixed(12)),
+        byAccount: [...byAccount.values()],
+        byTarget: rows.map(row => ({
+          account_name: row.account_name || '', model: row.requested_model || '', count: Number(row.count || 0),
+          input: Number(row.input || 0), output: Number(row.output || 0), cost: Number(Number(row.cost || 0).toFixed(12)),
+        })),
+      });
+    }
+    return {
+      cumulative: statsSummary(),
+      daily: statsSummary(' WHERE created_at >= ? AND created_at <= ?', [`${today}T00:00:00.000Z`, current.toISOString()]),
+      recent5h: statsSummary(' WHERE created_at >= ? AND created_at <= ?', [recentStart, current.toISOString()]),
+      trend: { range: range === 'month' ? 'month' : 'week', buckets },
+    };
   }
   const usageRepository = {
     async record(row) {
@@ -324,6 +414,7 @@ function createSqliteStore(dataFile, options = {}) {
         .all(...parameters, Number(options.limit), Number(options.offset)).map(usageRow);
       return { logs, total: Number(stats.total || 0), successCount: Number(stats.success_count || 0) };
     },
+    async stats(range, now) { return usageStats(range, now); },
     async clear() { db.exec('DELETE FROM usage_logs'); },
   };
 

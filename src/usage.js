@@ -219,8 +219,12 @@ function createUsageHandler(repository) {
     }
 
     if (url.pathname === '/admin/usage/stats' && request.method === 'GET') {
-      const logs = await repository.list();
       const now = new Date();
+      const range = url.searchParams.get('range') || 'week';
+      if (typeof repository.stats === 'function') {
+        return response({ success: true, ...await repository.stats(range, now) });
+      }
+      const logs = await repository.list();
       const today = now.toISOString().slice(0, 10);
       const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60_000);
       return response({
@@ -231,7 +235,7 @@ function createUsageHandler(repository) {
           const created = new Date(log.created_at);
           return Number.isFinite(created.getTime()) && created >= fiveHoursAgo && created <= now;
         })),
-        trend: dailyTrend(logs, url.searchParams.get('range') || 'week', now),
+        trend: dailyTrend(logs, range, now),
       });
     }
 

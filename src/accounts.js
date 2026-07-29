@@ -63,8 +63,6 @@ function sanitizeAccount(input, existing = {}) {
     model_map: input.model_map === undefined ? (existing.model_map || {}) : cleanModelMap(input.model_map),
     model_price_overrides: modelPriceOverrides,
     model_prices: modelPriceOverrides,
-    priority: numberInRange(input.priority, existing.priority || 1, 1),
-    weight: numberInRange(input.weight, existing.weight || 1, 1, 10),
     max_concurrency: numberInRange(input.max_concurrency, existing.max_concurrency || 0, 0),
     request_timeout_ms: numberInRange(input.request_timeout_ms, existing.request_timeout_ms || 120_000, 100, 900_000),
     enabled: input.enabled === undefined ? existing.enabled !== false : input.enabled !== false,

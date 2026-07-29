@@ -13,7 +13,7 @@
   const state = {
     accounts: [], usageOffset: 0, usageLimit: 50, usageTotal: 0,
     statsRange: 'week', trend: null, trendChart: null, editingPrices: {}, statusSnapshots: [],
-    testingAccount: null, testItems: [], currentView: 'accounts', apiKeys: [], usageKeys: [], globalPrices: {},
+    testingAccount: null, testItems: [], currentView: 'accounts', apiKeys: [], usageKeys: [], globalPrices: {}, pricingModels: [],
   };
   const byId = id => document.getElementById(id);
   const dialog = byId('accountDialog');
@@ -102,7 +102,6 @@
       return `<tr>
         <td><div class="account-name"><strong>${escapeHtml(account.name)}</strong><span>${escapeHtml(account.base_url)}</span></div></td>
         <td><div class="model-list">${models}${overflow}</div></td>
-        <td>${Number(account.priority || 1)} / ${Number(account.weight || 1)}</td>
         <td>${Number(account.max_concurrency || 0) || '不限'}</td>
         <td>${escapeHtml(allowanceLabel(account))}</td>
         <td><span class="status-label ${account.enabled === false ? 'disabled' : 'enabled'}">${account.enabled === false ? '停用' : '启用'}</span></td>
@@ -173,6 +172,8 @@
     try {
       const data = await requestJson('/admin/pricing');
       state.globalPrices = data.prices || {};
+      state.pricingModels = data.models || [];
+      renderPricingModelChoices();
       const entries = Object.entries(state.globalPrices);
       byId('pricingEmpty').classList.toggle('is-visible', entries.length === 0);
       byId('pricingBody').innerHTML = entries.map(([model, price]) => `<tr>
@@ -181,6 +182,31 @@
       </tr>`).join('');
       refreshIcons(byId('pricingBody'));
     } catch (error) { showToast(error.message, true); }
+  }
+
+  function matchingPrice(model) {
+    return Object.entries(state.globalPrices).find(([name]) => name.toLowerCase() === String(model || '').toLowerCase())?.[1] || null;
+  }
+
+  function renderPricingModelChoices(selectedModel = byId('globalPriceModel').value) {
+    const choice = byId('globalPriceModelChoice');
+    const match = state.pricingModels.find(model => model.toLowerCase() === String(selectedModel || '').toLowerCase());
+    choice.innerHTML = `<option value="">${state.pricingModels.length ? '选择账号中的模型' : '暂无已配置模型'}</option>`
+      + state.pricingModels.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+    choice.disabled = state.pricingModels.length === 0;
+    choice.value = match || '';
+  }
+
+  function openPriceDialog(model = '') {
+    byId('priceForm').reset();
+    byId('globalPriceModel').value = model;
+    const price = matchingPrice(model);
+    if (price) {
+      byId('globalPriceInput').value = price.input;
+      byId('globalPriceOutput').value = price.output;
+    }
+    renderPricingModelChoices(model);
+    byId('priceDialog').showModal();
   }
 
   function renderApiKeys() {
@@ -265,8 +291,6 @@
     byId('accountKey').value = account?.api_key || '';
     byId('accountModels').value = (account?.models || []).join('\n');
     byId('accountModelMap').value = modelMapToText(account?.model_map);
-    byId('accountPriority').value = account?.priority || 1;
-    byId('accountWeight').value = account?.weight || 1;
     byId('accountConcurrency').value = account?.max_concurrency || 0;
     byId('accountTimeout').value = Number(account?.request_timeout_ms || 120000) / 1000;
     byId('accountEnabled').checked = account?.enabled !== false;
@@ -301,8 +325,6 @@
       api_key: byId('accountKey').value.trim(),
       models: [...new Set(byId('accountModels').value.split('\n').map(value => value.trim()).filter(Boolean))],
       model_map: modelMapFromText(byId('accountModelMap').value),
-      priority: Number(byId('accountPriority').value || 1),
-      weight: Number(byId('accountWeight').value || 1),
       max_concurrency: Number(byId('accountConcurrency').value || 0),
       request_timeout_ms: Number(byId('accountTimeout').value || 120) * 1000,
       enabled: byId('accountEnabled').checked,
@@ -804,6 +826,7 @@
     document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('is-active', button.dataset.view === nextView));
     document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('is-active', panel.dataset.viewPanel === nextView));
     byId('pageTitle').textContent = route.title;
+    byId('pageMeta').hidden = nextView !== 'accounts';
     document.title = `${route.title} · LLM-APIs 管理后台`;
     if (push && window.location.pathname !== route.path) {
       window.history.pushState({ view: nextView }, '', route.path);
@@ -911,14 +934,28 @@
       await loadApiKeys();
     } catch (error) { showToast(error.message, true); }
   });
-  byId('addPriceButton').addEventListener('click', () => { byId('priceForm').reset(); byId('priceDialog').showModal(); });
+  byId('addPriceButton').addEventListener('click', () => openPriceDialog());
   byId('closePriceDialog').addEventListener('click', () => byId('priceDialog').close());
   byId('cancelPriceDialog').addEventListener('click', () => byId('priceDialog').close());
   byId('priceForm').addEventListener('submit', saveGlobalPrice);
+  byId('globalPriceModelChoice').addEventListener('change', event => {
+    const model = event.target.value;
+    if (!model) return;
+    byId('globalPriceModel').value = model;
+    const price = matchingPrice(model);
+    if (price) {
+      byId('globalPriceInput').value = price.input;
+      byId('globalPriceOutput').value = price.output;
+    } else {
+      byId('globalPriceInput').value = '';
+      byId('globalPriceOutput').value = '';
+    }
+  });
+  byId('globalPriceModel').addEventListener('input', event => renderPricingModelChoices(event.target.value));
   byId('pricingBody').addEventListener('click', async event => {
     const button = event.target.closest('[data-price-action]'); if (!button) return;
     const model = button.dataset.model; const price = state.globalPrices[model];
-    if (button.dataset.priceAction === 'edit') { byId('globalPriceModel').value = model; byId('globalPriceInput').value = price.input; byId('globalPriceOutput').value = price.output; byId('priceDialog').showModal(); return; }
+    if (button.dataset.priceAction === 'edit') { openPriceDialog(model); return; }
     if (window.confirm(`删除 ${model} 的全局价格？`)) { await requestJson(`/admin/pricing?model=${encodeURIComponent(model)}`, { method: 'DELETE' }); await loadPricing(); }
   });
   byId('refreshStatsButton').addEventListener('click', loadStats);

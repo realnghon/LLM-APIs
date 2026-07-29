@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -67,6 +68,41 @@ test('legacy account prices remain account overrides during SQLite migration', a
   assert.deepEqual(accounts.map(account => account.model_prices.shared), [{ input: 1, output: 2 }, { input: 3, output: 4 }]);
   const pricing = await (await fetch(`${app.baseUrl}/admin/pricing`, { headers: { Cookie: cookie } })).json();
   assert.deepEqual(pricing.prices, {});
+});
+
+test('legacy JSON and NDJSON files are imported once into SQLite', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-apis-legacy-import-'));
+  const dataFile = path.join(directory, 'kv.json');
+  const statusFile = path.join(directory, 'kv.status.json');
+  const currentUsage = path.join(directory, 'kv.usage.ndjson');
+  const archiveUsage = path.join(directory, 'kv.usage-2026-06.ndjson');
+  await fs.writeFile(dataFile, JSON.stringify({
+    accounts: JSON.stringify([{ id: 'legacy', name: 'Legacy', base_url: 'https://legacy.example/v1', api_key: 'key', models: ['model-a'] }]),
+    usage_logs: JSON.stringify([{ id: 'inline', request_id: 'inline', account_id: 'legacy', account_name: 'Legacy', requested_model: 'model-a', status: 200, created_at: '2026-07-01T00:00:00.000Z' }]),
+  }));
+  await fs.writeFile(currentUsage, `${JSON.stringify({ id: 'current', request_id: 'current', account_id: 'legacy', account_name: 'Legacy', requested_model: 'model-a', status: 200, created_at: '2026-07-02T00:00:00.000Z' })}\n`);
+  await fs.writeFile(archiveUsage, `${JSON.stringify({ id: 'archive', request_id: 'archive', account_id: 'legacy', account_name: 'Legacy', requested_model: 'model-a', status: 500, created_at: '2026-06-01T00:00:00.000Z' })}\n`);
+  await fs.writeFile(statusFile, JSON.stringify({ settings: { enabled: false, interval_minutes: 15 }, snapshots: [{ id: 'snap', checked_at: '2026-07-01T00:00:00.000Z', results: [] }] }));
+
+  let app = await startTestServer(createHttpHandler({ credentials, dataFile }));
+  t.after(async () => { await app?.close(); await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
+  let cookie = await login(app.baseUrl);
+  let accounts = (await (await fetch(`${app.baseUrl}/admin/accounts`, { headers: { Cookie: cookie } })).json()).accounts;
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0].name, 'Legacy');
+  let usage = await (await fetch(`${app.baseUrl}/admin/usage?limit=10`, { headers: { Cookie: cookie } })).json();
+  assert.deepEqual(usage.logs.map(row => row.id).sort(), ['archive', 'current', 'inline']);
+  const status = await (await fetch(`${app.baseUrl}/admin/status`, { headers: { Cookie: cookie } })).json();
+  assert.equal(status.settings.interval_minutes, 15);
+  assert.equal(status.snapshots[0].id, 'snap');
+  assert.equal(fsSync.existsSync(currentUsage), true);
+
+  await fs.appendFile(currentUsage, `${JSON.stringify({ id: 'late', request_id: 'late', created_at: '2026-07-03T00:00:00.000Z' })}\n`);
+  await app.close();
+  app = await startTestServer(createHttpHandler({ credentials, dataFile }));
+  cookie = await login(app.baseUrl);
+  usage = await (await fetch(`${app.baseUrl}/admin/usage?limit=10`, { headers: { Cookie: cookie } })).json();
+  assert.equal(usage.logs.some(row => row.id === 'late'), false);
 });
 
 test('global model prices are inherited and account overrides win', async t => {
