@@ -15,6 +15,8 @@
       <div class="brand"><span class="brand-mark">LA</span><span>LLM-APIs</span></div>
       <nav aria-label="管理导航">
         <a class="nav-item is-active" href="/admin/accounts" data-view="accounts"><i data-lucide="users"></i><span>账号管理</span></a>
+        <a class="nav-item" href="/admin/api-keys" data-view="keys"><i data-lucide="key-round"></i><span>API Keys</span></a>
+        <a class="nav-item" href="/admin/pricing" data-view="pricing"><i data-lucide="badge-dollar-sign"></i><span>模型价格</span></a>
         <a class="nav-item" href="/admin/usage" data-view="usage"><i data-lucide="list-checks"></i><span>使用记录</span></a>
         <a class="nav-item" href="/admin/stats" data-view="stats"><i data-lucide="chart-no-axes-combined"></i><span>累计统计</span></a>
         <a class="nav-item" href="/admin/status" data-view="status"><i data-lucide="activity"></i><span>运行状态</span></a>
@@ -46,6 +48,31 @@
           </div>
         </section>
 
+        <section class="view" data-view-panel="keys" aria-labelledby="keysHeading">
+          <div class="section-toolbar">
+            <h2 id="keysHeading">API Keys</h2>
+            <button class="button button-primary" id="addApiKeyButton"><i data-lucide="plus"></i>创建 Key</button>
+          </div>
+          <div class="status-controls">
+            <label class="switch-field"><input id="apiAuthRequired" type="checkbox" aria-label="强制 API Key 鉴权"><span class="switch"></span><span>强制 API Key 鉴权</span></label>
+          </div>
+          <div class="table-shell">
+            <table><thead><tr><th>名称</th><th>Key</th><th>可用模型</th><th>到期时间</th><th>状态</th><th class="actions-heading">操作</th></tr></thead><tbody id="apiKeysBody"></tbody></table>
+            <div class="empty-state" id="apiKeysEmpty"><i data-lucide="key-round"></i><strong>暂无 API Key</strong></div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="pricing" aria-labelledby="pricingHeading">
+          <div class="section-toolbar">
+            <h2 id="pricingHeading">全局模型价格</h2>
+            <button class="button button-primary" id="addPriceButton"><i data-lucide="plus"></i>新增价格</button>
+          </div>
+          <div class="table-shell">
+            <table><thead><tr><th>模型</th><th>输入 $ / 1M Tokens</th><th>输出 $ / 1M Tokens</th><th class="actions-heading">操作</th></tr></thead><tbody id="pricingBody"></tbody></table>
+            <div class="empty-state" id="pricingEmpty"><i data-lucide="badge-dollar-sign"></i><strong>暂无全局价格</strong></div>
+          </div>
+        </section>
+
         <section class="view" data-view-panel="usage" aria-labelledby="usageHeading">
           <div class="section-toolbar">
             <h2 id="usageHeading">使用记录</h2>
@@ -55,6 +82,7 @@
             </div>
           </div>
           <form class="filter-bar" id="usageFilters">
+            <label><span>API Key</span><select id="usageKey" name="api_key_id"><option value="">全部 Key</option></select></label>
             <label><span>调用者 IP</span><input id="usageIp" name="client_ip" placeholder="例如 10.0.0.8"></label>
             <label><span>上游账号筛选</span><select id="usageAccount" name="account_id"><option value="">全部账号</option></select></label>
             <label><span>模型</span><input id="usageModel" name="model" placeholder="模型名称"></label>
@@ -73,7 +101,7 @@
           </div>
           <div class="table-shell">
             <table class="usage-table">
-              <thead><tr><th>时间 / 请求</th><th>调用者 IP</th><th>上游账号</th><th>请求 / 上游模型</th><th>输入 / 输出 Tokens</th><th>费用</th><th>耗时</th><th>状态</th></tr></thead>
+              <thead><tr><th>时间 / 请求</th><th>Key / 调用者 IP</th><th>上游账号</th><th>请求 / 上游模型</th><th>输入 / 输出 Tokens</th><th>费用</th><th>首字 / 耗时</th><th>状态</th></tr></thead>
               <tbody id="usageBody"></tbody>
             </table>
             <div class="empty-state" id="usageEmpty"><i data-lucide="file-clock"></i><strong>暂无使用记录</strong></div>
@@ -189,6 +217,7 @@
       </div>
 
       <div class="tab-panel" data-tab-panel="pricing" role="tabpanel" hidden>
+        <p class="field-hint">默认继承全局模型价格，仅在这个上游渠道价格不同时启用覆盖。</p>
         <div class="price-header"><span>模型</span><span>输入 $ / 1M Tokens</span><span>输出 $ / 1M Tokens</span></div>
         <div id="modelPriceFields"></div>
       </div>
@@ -198,6 +227,30 @@
         <button type="button" class="button button-secondary" id="cancelDialogButton">取消</button>
         <button type="submit" class="button button-primary" id="saveAccountButton"><i data-lucide="save"></i>保存账号</button>
       </footer>
+    </form>
+  </dialog>
+
+  <dialog class="compact-dialog" id="apiKeyDialog" aria-labelledby="apiKeyDialogTitle">
+    <form id="apiKeyForm">
+      <header class="dialog-header"><div><h2 id="apiKeyDialogTitle">创建 API Key</h2><p>完整 Key 只显示一次</p></div><button type="button" class="icon-button" id="closeApiKeyDialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <div class="dialog-content">
+        <label class="field"><span>名称</span><input id="apiKeyName" required placeholder="例如 开发团队"></label>
+        <label class="field"><span>到期时间</span><input id="apiKeyExpiry" type="datetime-local"></label>
+        <label class="field"><span>模型白名单</span><textarea id="apiKeyModels" placeholder="每行一个模型，留空允许全部模型"></textarea></label>
+        <div class="secret-result" id="apiKeySecret" hidden><strong>请立即保存这个 Key</strong><code id="apiKeySecretValue"></code><button class="button button-secondary" type="button" id="copyApiKeyButton"><i data-lucide="copy"></i>复制</button></div>
+      </div>
+      <footer class="dialog-footer"><button type="button" class="button button-secondary" id="cancelApiKeyDialog">取消</button><button type="submit" class="button button-primary" id="saveApiKeyButton">创建</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="compact-dialog" id="priceDialog" aria-labelledby="priceDialogTitle">
+    <form id="priceForm">
+      <header class="dialog-header"><div><h2 id="priceDialogTitle">模型价格</h2></div><button type="button" class="icon-button" id="closePriceDialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <div class="dialog-content">
+        <label class="field"><span>模型</span><input id="globalPriceModel" required></label>
+        <div class="field-grid two-columns"><label class="field"><span>输入 $ / 1M Tokens</span><input id="globalPriceInput" type="number" min="0" step="0.000001" required></label><label class="field"><span>输出 $ / 1M Tokens</span><input id="globalPriceOutput" type="number" min="0" step="0.000001" required></label></div>
+      </div>
+      <footer class="dialog-footer"><button type="button" class="button button-secondary" id="cancelPriceDialog">取消</button><button type="submit" class="button button-primary">保存</button></footer>
     </form>
   </dialog>
 

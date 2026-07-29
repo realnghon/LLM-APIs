@@ -23,7 +23,13 @@ async function login(baseUrl) {
 test('concurrent usage records persist across restarts without loss', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-apis-usage-'));
   const dataFile = path.join(directory, 'kv.json');
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let first = null;
+  let second = null;
+  t.after(async () => {
+    await first?.close();
+    await second?.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
 
   let upstreamRequests = 0;
   const upstream = http.createServer(async (req, res) => {
@@ -38,7 +44,7 @@ test('concurrent usage records persist across restarts without loss', async t =>
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => upstream.close(resolve)));
 
-  const first = await startTestServer(createHttpHandler({ credentials, dataFile }));
+  first = await startTestServer(createHttpHandler({ credentials, dataFile }));
   const cookie = await login(first.baseUrl);
   const created = await fetch(`${first.baseUrl}/admin/accounts`, {
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
@@ -70,8 +76,7 @@ test('concurrent usage records persist across restarts without loss', async t =>
   assert.equal(upstreamRequests, 1005);
   await first.close();
 
-  const second = await startTestServer(createHttpHandler({ credentials, dataFile }));
-  t.after(second.close);
+  second = await startTestServer(createHttpHandler({ credentials, dataFile }));
   const secondCookie = await login(second.baseUrl);
   const response = await fetch(`${second.baseUrl}/admin/usage?limit=1000`, { headers: { Cookie: secondCookie } });
   const usage = await response.json();

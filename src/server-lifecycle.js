@@ -64,7 +64,7 @@ function printAddressInUse(port, filePath = pidFilePath()) {
   console.error('[LLM-APIs] 停止本项目服务（Windows / Linux 通用）：npm run stop');
 }
 
-function startServer(server, { port }) {
+function startServer(server, { port, host = '127.0.0.1' }) {
   const filePath = pidFilePath();
   let ownsPidFile = false;
   let shuttingDown = false;
@@ -105,15 +105,17 @@ function startServer(server, { port }) {
   server.once('listening', () => {
     writePidFile(port, filePath);
     ownsPidFile = true;
-    console.log(`LLM-APIs 本地运行: http://localhost:${port}`);
-    console.log(`管理后台: http://localhost:${port}/admin`);
+    const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+    console.log(`LLM-APIs 本地运行: http://${displayHost}:${port}`);
+    console.log(`管理后台: http://${displayHost}:${port}/admin`);
+    if (host === '0.0.0.0' || host === '::') console.warn('[LLM-APIs] 服务已对局域网开放，请启用 API Key 鉴权。');
     console.log('停止服务: npm run stop');
   });
 
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('exit', cleanup);
-  server.listen(port);
+  server.listen(port, host);
   return server;
 }
 

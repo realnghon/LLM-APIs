@@ -77,6 +77,7 @@ test('streaming proxy records final input and output tokens after the stream com
   const upstream = http.createServer(async (req, res) => {
     for await (const _chunk of req) { /* consume request */ }
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    await new Promise(resolve => setTimeout(resolve, 30));
     res.write('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n');
     res.write('data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":4,"total_tokens":11}}\n\n');
     res.end('data: [DONE]\n\n');
@@ -104,6 +105,8 @@ test('streaming proxy records final input and output tokens after the stream com
   assert.equal(logs.length, 1);
   assert.equal(logs[0].input_tokens, 7);
   assert.equal(logs[0].output_tokens, 4);
+  assert.equal(logs[0].first_token_ms >= 20, true);
+  assert.equal(logs[0].duration_ms >= logs[0].first_token_ms, true);
 });
 
 test('usage stats include weekly trend, cumulative cost and rolling five-hour account totals', async t => {

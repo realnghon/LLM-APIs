@@ -63,7 +63,6 @@ test('usage archive stores old months separately', async () => {
     });
     assert.ok(recentLogs.length >= 2, '最近一个月应该有至少 2 条记录');
     
-    console.log('✓ 归档功能测试通过');
   } finally {
     try {
       await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 3 });

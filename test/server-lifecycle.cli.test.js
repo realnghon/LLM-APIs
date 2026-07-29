@@ -46,7 +46,14 @@ test('duplicate startup explains how to stop the running cross-platform service'
   const pidFile = path.join(directory, 'server.pid');
   const dataFile = path.join(directory, 'kv.json');
   const port = await freePort();
-  const env = { ...process.env, PORT: String(port), DATA_FILE: dataFile, LLM_APIS_PID_FILE: pidFile };
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    DATA_FILE: dataFile,
+    LLM_APIS_PID_FILE: pidFile,
+    ADMIN_USERNAME: 'admin',
+    ADMIN_PASSWORD: 'password',
+  };
   let first;
 
   t.after(async () => {
@@ -56,7 +63,7 @@ test('duplicate startup explains how to stop the running cross-platform service'
 
   first = spawn(process.execPath, ['APIs.js'], { cwd: path.join(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   const firstCapture = capture(first);
-  await waitFor(() => firstCapture.output().includes(`http://localhost:${port}`));
+  await waitFor(() => firstCapture.output().includes(`http://127.0.0.1:${port}`));
 
   const second = spawn(process.execPath, ['APIs.js'], { cwd: path.join(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   const secondResult = await capture(second).close();

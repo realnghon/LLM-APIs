@@ -23,7 +23,11 @@ async function login(baseUrl) {
 test('accounts persist across application restarts', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-apis-'));
   const dataFile = path.join(directory, 'kv.json');
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let second = null;
+  t.after(async () => {
+    await second?.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
 
   const first = await startTestServer(createHttpHandler({ credentials, dataFile }));
   const firstCookie = await login(first.baseUrl);
@@ -39,11 +43,9 @@ test('accounts persist across application restarts', async t => {
   });
   assert.equal(created.status, 200);
   await first.close();
-  const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-  assert.match(String(stored.accounts), /Persistent/);
+  await fs.access(path.join(directory, 'kv.sqlite'));
 
-  const second = await startTestServer(createHttpHandler({ credentials, dataFile }));
-  t.after(second.close);
+  second = await startTestServer(createHttpHandler({ credentials, dataFile }));
   const secondCookie = await login(second.baseUrl);
   const listed = await fetch(`${second.baseUrl}/admin/accounts`, {
     headers: { Cookie: secondCookie },

@@ -20,9 +20,13 @@ function createCoreHandler(accountRepository) {
       const models = [...new Set(accounts
         .filter(account => account.enabled !== false)
         .flatMap(account => [...(account.models || []), ...Object.keys(account.model_map || {})]))];
+      const allowed = request.apiKey?.models || [];
+      const visibleModels = allowed.length
+        ? models.filter(model => allowed.some(item => item.toLowerCase() === model.toLowerCase()))
+        : models;
       return Response.json({
         object: 'list',
-        data: models.sort().map(id => ({ id, object: 'model', created: 0, owned_by: 'llm-apis' })),
+        data: visibleModels.sort().map(id => ({ id, object: 'model', created: 0, owned_by: 'llm-apis' })),
       });
     }
     return Response.json({ error: 'Not found', admin: '/admin' }, { status: 404 });

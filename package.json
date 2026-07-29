@@ -3,8 +3,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "1.0.7",
-  "description": "轻量级本地大语言模型 API 代理，支持多账号路由、自动故障转移、登录保护和用量监控。",
+  "version": "2.0.0",
+  "description": "轻量级本地大语言模型 API 网关，支持多账号路由、API Key、SQLite 持久化和用量监控。",
   "main": "APIs.js",
   "files": [
     "APIs.js",
@@ -37,7 +37,7 @@
     "url": "git+https://github.com/realnghon/LLM-APIs.git"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.103",

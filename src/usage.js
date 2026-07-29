@@ -19,7 +19,8 @@ function clientIp(request) {
 
 function modelPrice(account, model) {
   const prices = account?.model_prices || {};
-  return prices[model] || prices['*'] || {};
+  const exact = Object.entries(prices).find(([name]) => name.toLowerCase() === String(model || '').toLowerCase());
+  return exact?.[1] || prices['*'] || {};
 }
 
 function usageCost(account, model, usage = {}) {
@@ -118,7 +119,7 @@ function dailyTrend(logs, range, now = new Date()) {
   return { range: range === 'month' ? 'month' : 'week', buckets };
 }
 
-function usageEntry({ requestId, account, model, upstreamModel, requestPath, clientIp: callerIp, status, durationMs, stream, error, attempts = [], usage = {} }) {
+function usageEntry({ requestId, account, apiKey, model, upstreamModel, requestPath, clientIp: callerIp, status, durationMs, firstTokenMs, stream, error, attempts = [], usage = {} }) {
   const id = requestId || `usage_${crypto.randomUUID()}`;
   const inputTokens = number(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens ?? usage.promptTokens);
   const outputTokens = number(usage.completion_tokens ?? usage.output_tokens ?? usage.outputTokens ?? usage.completionTokens);
@@ -127,12 +128,16 @@ function usageEntry({ requestId, account, model, upstreamModel, requestPath, cli
     request_id: id,
     account_id: account?.id || '',
     account_name: account?.name || '',
+    api_key_id: apiKey?.id || '',
+    api_key_name: apiKey?.name || '',
+    api_key_prefix: apiKey?.prefix || '',
     requested_model: model || '',
     upstream_model: upstreamModel || model || '',
     request_path: requestPath || '',
     client_ip: callerIp || '',
     status: Number(status || 0),
     duration_ms: Number(durationMs || 0),
+    first_token_ms: firstTokenMs == null ? null : Number(firstTokenMs),
     stream: stream === true,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
@@ -154,6 +159,7 @@ function endOfDay(value) {
 
 function filterLogs(logs, searchParams) {
   const accountId = searchParams.get('account_id') || '';
+  const apiKeyId = searchParams.get('api_key_id') || '';
   const model = (searchParams.get('model') || '').toLowerCase();
   const callerIp = searchParams.get('client_ip') || '';
   const status = searchParams.get('status') || '';
@@ -162,6 +168,7 @@ function filterLogs(logs, searchParams) {
   return logs.filter(log => {
     const code = Number(log.status || 0);
     if (accountId && log.account_id !== accountId) return false;
+    if (apiKeyId && log.api_key_id !== apiKeyId) return false;
     if (model && !String(log.requested_model || '').toLowerCase().includes(model)) return false;
     if (callerIp && !String(log.client_ip || '').includes(callerIp)) return false;
     if (status === 'success' && !(code >= 200 && code < 400)) return false;
@@ -190,9 +197,17 @@ function createUsageHandler(repository) {
     if (url.pathname === '/admin/usage' && request.method === 'GET') {
       const from = url.searchParams.get('from') || '';
       const to = endOfDay(url.searchParams.get('to') || '');
-      const allLogs = filterLogs(await repository.list({ from, to }), url.searchParams);
       const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit') || 25)));
       const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
+      if (typeof repository.page === 'function') {
+        const page = await repository.page({
+          apiKeyId: url.searchParams.get('api_key_id') || '', accountId: url.searchParams.get('account_id') || '',
+          clientIp: url.searchParams.get('client_ip') || '', model: url.searchParams.get('model') || '',
+          status: url.searchParams.get('status') || '', from, to, limit, offset,
+        });
+        return response({ success: true, logs: page.logs, total: page.total, stats: { success_count: page.successCount, error_count: page.total - page.successCount } });
+      }
+      const allLogs = filterLogs(await repository.list({ from, to }), url.searchParams);
       const logs = allLogs.slice(offset, offset + limit);
       const successCount = allLogs.filter(log => Number(log.status) >= 200 && Number(log.status) < 400).length;
       return response({

@@ -1,10 +1,18 @@
 # LLM-APIs
 
-轻量级本地大语言模型 API 代理，支持多账号路由、自动故障转移、登录保护和用量监控。
+轻量级本地大语言模型 API 网关，支持多账号路由、自动故障转移、API Key、SQLite 持久化和用量监控。
+
+## 2.0 升级说明
+
+- 最低运行版本升级为 Node.js 22.13。
+- 默认端口由 `8787` 改为 `8586`，运行参数集中在 `config/service.json`。
+- 首次启动自动将旧 JSON、NDJSON 和状态文件导入 SQLite，原文件会保留。
+- 启动前必须创建 `config/admin.json`，或设置 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`。
+- 客户端 Key 默认由管理员创建后手动开启强制鉴权，便于现有部署平滑升级。
 
 ## 快速开始
 
-**要求**: Node.js 18+
+**要求**: Node.js 22.13+
 
 ### 联网环境
 
@@ -17,7 +25,7 @@ cp config/admin.example.json config/admin.json  # Windows: Copy-Item config/admi
 npm start
 ```
 
-启动后访问 `http://localhost:8787/admin` 登录管理后台，API 地址为 `http://localhost:8787/v1`。
+启动后访问 `http://localhost:8586/admin` 登录管理后台，API 地址为 `http://localhost:8586/v1`。
 
 停止服务：`npm run stop`
 
@@ -38,7 +46,7 @@ npm run build:offline
 
 ```bash
 # 1. 解压离线包
-tar -xzf llm-apis-v1.0.7-offline-20250103.tar.gz
+    tar -xzf llm-apis-v2.0.0-offline-20260729.tar.gz
 
 # 2. 进入目录
 cd LLM-APIs
@@ -52,7 +60,7 @@ npm start
 ```
 
 > [!WARNING]
-> API 路由默认不验证客户端身份且允许跨域请求，请仅在可信网络中运行。
+> 新安装完成后请先创建客户端 Key，并在“API Keys”页面开启强制鉴权。未开启时 API 路由允许匿名访问，请仅在可信网络中运行。
 
 ## 添加上游账号
 
@@ -68,7 +76,7 @@ npm start
 - **权重**：同优先级账号的负载分配权重
 - **最大并发**：0 表示不限制
 - **请求超时**：超时后自动尝试下一账号（秒）
-- **模型价格**：每百万输入/输出 Tokens 的美元单价
+- **模型价格**：在“模型价格”页面统一维护；账号仅在渠道价格不同时设置覆盖值
 
 ## 使用 API
 
@@ -76,8 +84,8 @@ npm start
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8787/v1",
-    api_key="local"
+    base_url="http://localhost:8586/v1",
+    api_key="llm_创建后显示的完整Key"
 )
 
 response = client.chat.completions.create(
@@ -93,15 +101,37 @@ print(response.choices[0].message.content)
 - **自动故障转移**：网络错误、超时、限流时自动切换下一账号
 - **用量统计**：记录每次请求的 Tokens、费用、耗时和状态
 - **按月归档**：历史记录自动按月归档，无记录数量限制
+- **API Key**：创建下游 Key、限制可用模型，并按 Key 追踪用量
+- **SQLite 持久化**：首次启动自动创建数据库，并自动导入旧 JSON/NDJSON 数据
 - **健康监测**：定时检测账号和模型可用性
 - **离线部署**：所有前端资源内置，无需外网访问
 
 ## 配置
 
-**环境变量**：
+**服务配置**：
 
-- `PORT`：HTTP 监听端口（默认 8787）
+默认配置位于 `config/service.json`：
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8586,
+  "max_request_body_bytes": 10485760,
+  "headers_timeout_ms": 15000,
+  "request_timeout_ms": 300000,
+  "keep_alive_timeout_ms": 5000
+}
+```
+
+环境变量可以覆盖配置文件中的对应项目：
+
+- `PORT`：HTTP 监听端口（默认 8586）
+- `HOST`：监听地址（默认 `127.0.0.1`；局域网访问可设为 `0.0.0.0`）
 - `DATA_FILE`：数据文件路径（默认 `apis-data/kv.json`）
+- `DATABASE_FILE`：SQLite 文件路径（默认与 `DATA_FILE` 同目录、同名 `.sqlite`）
+- `MAX_REQUEST_BODY_BYTES`：最大请求体字节数（默认 10 MiB）
+- `LOG_LEVEL`：日志等级（`debug`、`info`、`warn`、`error`，默认 `info`）
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD`：可替代 `config/admin.json` 提供管理员凭据
 
 **数据文件**：
 
@@ -109,6 +139,18 @@ print(response.choices[0].message.content)
 - `apis-data/kv.usage.ndjson`：当前月用量记录
 - `apis-data/kv.usage-YYYY-MM.ndjson`：历史归档
 - `apis-data/kv.status.json`：健康检查状态
+
+升级后以 `apis-data/kv.sqlite` 为主存储。第一次启动会自动导入以上旧文件，旧文件不会自动删除。
+
+## API Key
+
+后台“API Keys”页面可以创建、停用和撤销客户端 Key。完整 Key 只在创建时显示一次，数据库仅保存哈希。
+
+创建至少一个 Key 后，可在该页面开启“强制 API Key 鉴权”。开启后 `/v1/*`、`/v3/*` 及模型列表都必须携带：
+
+```http
+Authorization: Bearer llm_xxx
+```
 
 ## License
 

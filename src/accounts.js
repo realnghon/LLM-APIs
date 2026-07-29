@@ -47,17 +47,22 @@ function cleanAllowance(input, existing) {
 
 function sanitizeAccount(input, existing = {}) {
   const now = new Date().toISOString();
+  const priceInput = input.model_price_overrides === undefined ? input.model_prices : input.model_price_overrides;
+  const modelPriceOverrides = priceInput === undefined
+    ? (existing.model_price_overrides || existing.model_prices || {})
+    : cleanModelPrices(priceInput);
   return {
     id: existing.id || input.id || `acc_${crypto.randomUUID()}`,
     name: String(input.name || existing.name || '').trim(),
     base_url: String(input.base_url ?? existing.base_url ?? '').trim().replace(/\/+$/, ''),
     api_key: String(input.api_key ?? existing.api_key ?? '').trim(),
-    format: input.format === 'anthropic' ? 'anthropic' : 'openai',
+    format: (input.format ?? existing.format) === 'anthropic' ? 'anthropic' : 'openai',
     models: Array.isArray(input.models)
       ? [...new Set(input.models.map(model => String(model).trim()).filter(Boolean))]
       : (existing.models || []),
     model_map: input.model_map === undefined ? (existing.model_map || {}) : cleanModelMap(input.model_map),
-    model_prices: input.model_prices === undefined ? (existing.model_prices || {}) : cleanModelPrices(input.model_prices),
+    model_price_overrides: modelPriceOverrides,
+    model_prices: modelPriceOverrides,
     priority: numberInRange(input.priority, existing.priority || 1, 1),
     weight: numberInRange(input.weight, existing.weight || 1, 1, 10),
     max_concurrency: numberInRange(input.max_concurrency, existing.max_concurrency || 0, 0),
@@ -149,6 +154,13 @@ function createAccountsHandler(repository, options = {}) {
         return response({ success: false, error: '名称、接口地址、API Key 和模型不能为空' }, 400);
       }
       await repository.save(account);
+      if (statusRepository && typeof statusRepository.reconcileAccountResults === 'function') {
+        const targets = account.enabled === false ? [] : [
+          ...(account.models || []).map(model => `direct:${model}`),
+          ...Object.keys(account.model_map || {}).map(model => `map:${model}`),
+        ];
+        await statusRepository.reconcileAccountResults(account.id, targets);
+      }
       return response({ success: true, account });
     }
 

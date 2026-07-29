@@ -59,7 +59,7 @@ function responseHeaders(upstreamHeaders, extra = {}) {
   return headers;
 }
 
-function createSseUsageObserver(usage) {
+function createSseUsageObserver(usage, onFirstToken = () => {}) {
   const decoder = new TextDecoder();
   let buffered = '';
   return chunk => {
@@ -73,6 +73,9 @@ function createSseUsageObserver(usage) {
       try {
         const parsed = JSON.parse(data);
         if (parsed.usage && typeof parsed.usage === 'object') Object.assign(usage, parsed.usage);
+        const content = parsed.choices?.some(choice => choice.delta?.content || choice.text)
+          || parsed.delta?.text || parsed.content_block?.text;
+        if (content) onFirstToken();
       } catch { /* non-JSON SSE events do not carry usage */ }
     }
   };
@@ -105,6 +108,8 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
     const requestId = `usage_${crypto.randomUUID()}`;
     const requestStartedAt = Date.now();
     const callerIp = clientIp(request);
+    const apiKey = request.apiKey || null;
+    let firstTokenMs = null;
     const attempts = [];
     async function record(result) {
       if (!usageRepository) return;
@@ -114,7 +119,9 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
           requestPath: url.pathname,
           clientIp: callerIp,
           durationMs: Date.now() - requestStartedAt,
+          firstTokenMs,
           attempts,
+          apiKey,
           ...result,
         }));
       } catch (error) {
@@ -155,12 +162,23 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         attempts.push({ account_id: account.id, account_name: account.name, status: 0, duration_ms: 0, error: 'allowance exhausted' });
         continue;
       }
+      let countReserved = false;
+      if (account.allowance?.quota_mode === 'count' && typeof accountRepository.reserveCountAllowance === 'function') {
+        countReserved = await accountRepository.reserveCountAllowance(account.id);
+        if (!countReserved) {
+          exhaustedByAllowance = true;
+          lastError = `[${account.name || account.id}] allowance exhausted`;
+          attempts.push({ account_id: account.id, account_name: account.name, status: 0, duration_ms: 0, error: 'allowance exhausted' });
+          continue;
+        }
+      }
       let upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
       if (body.stream === true && account.format !== 'anthropic') {
         upstreamBody = { ...upstreamBody, stream_options: { ...(body.stream_options || {}), include_usage: true } };
       }
       const release = concurrency.acquire(account);
       if (!release) {
+        if (countReserved && typeof accountRepository.refundCountAllowance === 'function') await accountRepository.refundCountAllowance(account.id);
         lastError = `[${account.name || account.id}] concurrency limit`;
         attempts.push({ account_id: account.id, account_name: account.name, status: 0, duration_ms: 0, error: 'concurrency limit' });
         continue;
@@ -169,7 +187,7 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
       const deadline = account.format === 'anthropic' ? null : createDeadline(request.signal, account.request_timeout_ms);
       try {
         const response = account.format === 'anthropic'
-          ? await proxyAnthropic({ account, body: upstreamBody, requestedModel: model, upstreamModel })
+          ? await proxyAnthropic({ account, body: upstreamBody, requestedModel: model, upstreamModel, signal: request.signal })
           : await fetchUpstream(targetUrl(account.base_url, url.pathname), {
             method: 'POST',
             headers: {
@@ -179,6 +197,7 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
             body: JSON.stringify(upstreamBody),
             signal: deadline.signal,
           });
+        if (body.stream !== true && firstTokenMs === null) firstTokenMs = Date.now() - requestStartedAt;
         const headers = responseHeaders(response.headers, {
           'X-Upstream-Account': account.name || account.id,
           'X-Upstream-Time': `${Date.now() - startedAt}ms`,
@@ -195,11 +214,13 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         attempts.push({ account_id: account.id, account_name: account.name, status: response.status, duration_ms: Date.now() - startedAt, error: '' });
         if (!shouldFailOver(response.status)) {
           if (body.stream === true) {
-            const observeUsage = createSseUsageObserver(responseUsage);
+            const observeUsage = createSseUsageObserver(responseUsage, () => {
+              if (firstTokenMs === null) firstTokenMs = Date.now() - requestStartedAt;
+            });
             const responseBody = finalizeStream(response.body, async () => {
               deadline?.cleanup();
               release();
-              if (response.ok && typeof accountRepository.debitAllowance === 'function') {
+              if (response.ok && !countReserved && typeof accountRepository.debitAllowance === 'function') {
                 const debit = allowanceDebit(account, upstreamModel, responseUsage);
                 if (debit > 0) await accountRepository.debitAllowance(account.id, debit);
               }
@@ -208,7 +229,7 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
             return new Response(responseBody, { status: response.status, headers });
           }
           const responseBody = new Response(responseData, { status: response.status, headers });
-          if (response.ok && typeof accountRepository.debitAllowance === 'function') {
+           if (response.ok && !countReserved && typeof accountRepository.debitAllowance === 'function') {
             const debit = allowanceDebit(account, upstreamModel, responseUsage);
             if (debit > 0) await accountRepository.debitAllowance(account.id, debit);
           }
@@ -217,10 +238,12 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
           return responseBody;
         }
         lastError = `[${account.name || account.id}] upstream ${response.status}`;
+        if (countReserved && typeof accountRepository.refundCountAllowance === 'function') await accountRepository.refundCountAllowance(account.id);
         await response.body?.cancel().catch(() => {});
         deadline?.cleanup();
         release();
       } catch (error) {
+        if (countReserved && typeof accountRepository.refundCountAllowance === 'function') await accountRepository.refundCountAllowance(account.id);
         deadline?.cleanup();
         release();
         lastError = `[${account.name || account.id}] ${error.message}`;

@@ -18,6 +18,8 @@ module.exports = defineConfig({
     env: {
       ...process.env,
       PORT: '3210',
+      ADMIN_USERNAME: 'admin',
+      ADMIN_PASSWORD: 'password',
       DATA_FILE: path.join(os.tmpdir(), `llm-apis-browser-test-${process.pid}.json`),
       LLM_APIS_PID_FILE: path.join(os.tmpdir(), `llm-apis-browser-test-${process.pid}.pid`),
     },

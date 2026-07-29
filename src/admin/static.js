@@ -12,6 +12,8 @@ const ADMIN_SHELL_PATHS = new Set([
   '/admin/usage',
   '/admin/stats',
   '/admin/status',
+  '/admin/api-keys',
+  '/admin/pricing',
 ]);
 const ASSETS = new Map([
   ['/assets/admin.css', ['admin/admin.css', 'text/css; charset=utf-8']],

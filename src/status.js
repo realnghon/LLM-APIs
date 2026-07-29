@@ -27,6 +27,11 @@ function createMemoryStatusRepository() {
         snapshot.results = results.filter(result => result.account_id !== accountId);
       }
     },
+    async reconcileAccountResults(accountId, targetKeys) {
+      const allowed = new Set(targetKeys);
+      for (const snapshot of snapshots) snapshot.results = (snapshot.results || [])
+        .filter(result => result.account_id !== accountId || allowed.has(result.target_key || `direct:${result.model}`));
+    },
   };
 }
 
@@ -60,6 +65,8 @@ function createStatusMonitor({ accountRepository, statusRepository, testAccountF
         return results.map(result => ({
           account_id: account.id,
           account_name: account.name,
+          target_key: result.target_key || (String(result.label || '').includes('→')
+            ? `map:${String(result.label).split('→')[0].trim()}` : `direct:${result.model}`),
           model: result.model,
           label: result.label,
           ok: result.ok === true,
@@ -73,6 +80,12 @@ function createStatusMonitor({ accountRepository, statusRepository, testAccountF
         checked_at: new Date().toISOString(),
         results: nested.flat(),
       };
+      const currentAccounts = await accountRepository.list();
+      const currentTargets = new Map(currentAccounts.filter(account => account.enabled !== false).map(account => [account.id, new Set([
+        ...(account.models || []).map(model => `direct:${model}`),
+        ...Object.keys(account.model_map || {}).map(model => `map:${model}`),
+      ])]));
+      snapshot.results = snapshot.results.filter(result => currentTargets.get(result.account_id)?.has(result.target_key));
       await statusRepository.addSnapshot(snapshot);
       return snapshot;
     })();
@@ -92,6 +105,10 @@ function createStatusMonitor({ accountRepository, statusRepository, testAccountF
       return { ...settings };
     },
     run,
+    dispose() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
   };
 }
 

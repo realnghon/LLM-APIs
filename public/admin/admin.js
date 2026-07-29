@@ -3,6 +3,8 @@
 (() => {
   const VIEWS = {
     accounts: { path: '/admin/accounts', title: '账号管理' },
+    keys: { path: '/admin/api-keys', title: 'API Keys' },
+    pricing: { path: '/admin/pricing', title: '模型价格' },
     usage: { path: '/admin/usage', title: '使用记录' },
     stats: { path: '/admin/stats', title: '累计统计' },
     status: { path: '/admin/status', title: '运行状态' },
@@ -11,7 +13,7 @@
   const state = {
     accounts: [], usageOffset: 0, usageLimit: 50, usageTotal: 0,
     statsRange: 'week', trend: null, trendChart: null, editingPrices: {}, statusSnapshots: [],
-    testingAccount: null, testItems: [], currentView: 'accounts',
+    testingAccount: null, testItems: [], currentView: 'accounts', apiKeys: [], usageKeys: [], globalPrices: {},
   };
   const byId = id => document.getElementById(id);
   const dialog = byId('accountDialog');
@@ -127,6 +129,7 @@
   }
 
   function selectTab(name) {
+    if (!document.querySelector('[data-tab-panel="pricing"]').hidden) capturePrices();
     if (name === 'pricing') renderPriceFields();
     document.querySelectorAll('[data-tab]').forEach(tab => {
       tab.setAttribute('aria-selected', String(tab.dataset.tab === name));
@@ -151,24 +154,104 @@
   }
 
   function capturePrices() {
-    document.querySelectorAll('[data-price-model]').forEach(row => {
-      state.editingPrices[row.dataset.priceModel] = {
+    const captured = {};
+    const rows = document.querySelectorAll('[data-price-model]');
+    if (!rows.length) return state.editingPrices;
+    rows.forEach(row => {
+      const input = row.querySelector('[data-price-input]');
+      if (input.dataset.inherited === 'true') return;
+      captured[row.dataset.priceModel] = {
         input: Number(row.querySelector('[data-price-input]').value || 0),
         output: Number(row.querySelector('[data-price-output]').value || 0),
       };
     });
-    return state.editingPrices;
+    state.editingPrices = captured;
+    return captured;
+  }
+
+  async function loadPricing() {
+    try {
+      const data = await requestJson('/admin/pricing');
+      state.globalPrices = data.prices || {};
+      const entries = Object.entries(state.globalPrices);
+      byId('pricingEmpty').classList.toggle('is-visible', entries.length === 0);
+      byId('pricingBody').innerHTML = entries.map(([model, price]) => `<tr>
+        <td><strong>${escapeHtml(model)}</strong></td><td class="monospace">${Number(price.input || 0)}</td><td class="monospace">${Number(price.output || 0)}</td>
+        <td><div class="row-actions"><button class="icon-button" data-price-action="edit" data-model="${escapeHtml(model)}" title="编辑" aria-label="编辑 ${escapeHtml(model)}">${icon('pencil')}</button><button class="icon-button danger" data-price-action="delete" data-model="${escapeHtml(model)}" title="删除" aria-label="删除 ${escapeHtml(model)}">${icon('trash-2')}</button></div></td>
+      </tr>`).join('');
+      refreshIcons(byId('pricingBody'));
+    } catch (error) { showToast(error.message, true); }
+  }
+
+  function renderApiKeys() {
+    byId('apiKeysEmpty').classList.toggle('is-visible', state.apiKeys.length === 0);
+    byId('apiKeysBody').innerHTML = state.apiKeys.map(key => `<tr>
+      <td><strong>${escapeHtml(key.name)}</strong></td><td class="monospace">${escapeHtml(key.masked_key)}</td>
+      <td>${key.models?.length ? key.models.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join(' ') : '全部模型'}</td>
+      <td>${key.expires_at ? escapeHtml(new Date(key.expires_at).toLocaleString('zh-CN', { hour12: false })) : '永不过期'}</td>
+      <td><span class="status-label ${key.enabled ? 'enabled' : 'disabled'}">${key.enabled ? '启用' : '停用'}</span></td>
+      <td><div class="row-actions"><button class="icon-button" data-key-action="toggle" data-id="${escapeHtml(key.id)}" title="${key.enabled ? '停用' : '启用'}" aria-label="${key.enabled ? '停用' : '启用'} ${escapeHtml(key.name)}">${icon(key.enabled ? 'pause' : 'play')}</button><button class="icon-button danger" data-key-action="delete" data-id="${escapeHtml(key.id)}" title="撤销" aria-label="撤销 ${escapeHtml(key.name)}">${icon('trash-2')}</button></div></td>
+    </tr>`).join('');
+    const usageKey = byId('usageKey');
+    const selected = usageKey.value;
+    usageKey.innerHTML = '<option value="">全部 Key</option>' + state.usageKeys.map(key => `<option value="${escapeHtml(key.id)}">${escapeHtml(key.name)}${state.apiKeys.some(item => item.id === key.id) ? '' : '（已撤销）'}</option>`).join('');
+    usageKey.value = state.usageKeys.some(key => key.id === selected) ? selected : '';
+    refreshIcons(byId('apiKeysBody'));
+  }
+
+  async function loadApiKeys() {
+    try {
+      const data = await requestJson('/admin/api-keys');
+      state.apiKeys = data.keys || [];
+      state.usageKeys = data.usage_keys || [];
+      byId('apiAuthRequired').checked = data.required === true;
+      renderApiKeys();
+    } catch (error) { showToast(error.message, true); }
+  }
+
+  function openApiKeyDialog() {
+    byId('apiKeyForm').reset();
+    byId('apiKeySecret').hidden = true;
+    byId('saveApiKeyButton').hidden = false;
+    byId('apiKeyDialog').showModal();
+  }
+
+  async function saveApiKey(event) {
+    event.preventDefault();
+    try {
+      const expiry = byId('apiKeyExpiry').value;
+      const data = await requestJson('/admin/api-keys', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: byId('apiKeyName').value.trim(), expires_at: expiry ? new Date(expiry).toISOString() : '', models: byId('apiKeyModels').value.split('\n').map(value => value.trim()).filter(Boolean) }),
+      });
+      byId('apiKeySecretValue').textContent = data.api_key.key;
+      byId('apiKeySecret').hidden = false;
+      byId('saveApiKeyButton').hidden = true;
+      await loadApiKeys();
+    } catch (error) { showToast(error.message, true); }
+  }
+
+  async function saveGlobalPrice(event) {
+    event.preventDefault();
+    try {
+      await requestJson('/admin/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: byId('globalPriceModel').value.trim(), input: Number(byId('globalPriceInput').value), output: Number(byId('globalPriceOutput').value) }) });
+      byId('priceDialog').close();
+      await loadPricing();
+      showToast('全局价格已保存');
+    } catch (error) { showToast(error.message, true); }
   }
 
   function renderPriceFields() {
-    capturePrices();
     const models = priceModels();
     byId('modelPriceFields').innerHTML = models.length ? models.map(model => {
-      const price = state.editingPrices[model] || {};
+      const override = state.editingPrices[model];
+      const global = Object.entries(state.globalPrices).find(([name]) => name.toLowerCase() === model.toLowerCase())?.[1] || {};
+      const price = override || global;
       return `<div class="price-row" data-price-model="${escapeHtml(model)}">
-        <strong title="${escapeHtml(model)}">${escapeHtml(model)}</strong>
-        <input type="number" min="0" step="0.000001" value="${Number(price.input || 0)}" data-price-input aria-label="${escapeHtml(model)} 输入单价">
-        <input type="number" min="0" step="0.000001" value="${Number(price.output || 0)}" data-price-output aria-label="${escapeHtml(model)} 输出单价">
+        <strong title="${escapeHtml(model)}">${escapeHtml(model)}<small>${override ? '账号覆盖' : '继承全局'}</small></strong>
+        <input type="number" min="0" step="0.000001" value="${Number(price.input || 0)}" data-price-input data-inherited="${override ? 'false' : 'true'}" ${override ? '' : 'disabled'} aria-label="${escapeHtml(model)} 输入单价">
+        <input type="number" min="0" step="0.000001" value="${Number(price.output || 0)}" data-price-output data-inherited="${override ? 'false' : 'true'}" ${override ? '' : 'disabled'} aria-label="${escapeHtml(model)} 输出单价">
+        <button type="button" class="button button-secondary price-mode" data-price-toggle>${override ? '恢复继承' : '覆盖'}</button>
       </div>`;
     }).join('') : '<div class="inline-empty">暂无模型</div>';
   }
@@ -188,7 +271,8 @@
     byId('accountTimeout').value = Number(account?.request_timeout_ms || 120000) / 1000;
     byId('accountEnabled').checked = account?.enabled !== false;
     byId('accountNote').value = account?.note || '';
-    state.editingPrices = JSON.parse(JSON.stringify(account?.model_prices || {}));
+    state.editingPrices = JSON.parse(JSON.stringify(account?.model_price_overrides || {}));
+    byId('modelPriceFields').innerHTML = '';
     const allowance = accountAllowance(account || {});
     byId('allowanceType').value = allowance?.quota_mode || 'none';
     byId('allowanceTotal').value = allowance?.quota_total ?? '';
@@ -223,7 +307,7 @@
       request_timeout_ms: Number(byId('accountTimeout').value || 120) * 1000,
       enabled: byId('accountEnabled').checked,
       note: byId('accountNote').value.trim(),
-      model_prices: capturePrices(),
+      model_price_overrides: capturePrices(),
       allowance: allowanceType === 'none' ? null : {
         type: 'total',
         quota_mode: allowanceType,
@@ -312,7 +396,7 @@
       <div class="cell-stack"><strong>${escapeHtml(result.label || result.model)}</strong><small>${escapeHtml(result.model || '')}</small></div>
       <span class="status-label ${result.pending ? '' : result.ok ? 'enabled' : 'disabled'}">${result.pending ? '等待' : result.ok ? '正常' : '失败'}</span>
       <span>${result.pending ? '-' : `${formatNumber(result.latency_ms)} ms`}</span>
-      <span class="test-error" title="${escapeHtml(result.error || '')}">${result.pending ? '检测中' : result.error || `HTTP ${result.status || 0}`}</span>
+      <span class="test-error" title="${escapeHtml(result.error || '')}">${escapeHtml(result.pending ? '检测中' : result.error || `HTTP ${result.status || 0}`)}</span>
     </div>`).join('');
   }
 
@@ -399,7 +483,7 @@
   async function loadUsage() {
     try {
       const params = new URLSearchParams({ limit: state.usageLimit, offset: state.usageOffset });
-      for (const id of ['usageIp', 'usageAccount', 'usageModel', 'usageFrom', 'usageTo', 'usageStatus']) {
+      for (const id of ['usageKey', 'usageIp', 'usageAccount', 'usageModel', 'usageFrom', 'usageTo', 'usageStatus']) {
         const input = byId(id);
         if (input.value) params.set(input.name, usageFilterValue(id, input.value));
       }
@@ -418,12 +502,12 @@
         const statusTitle = log.error || (attemptCount > 1 ? `${attemptCount} 次上游尝试` : '');
         return `<tr>
           <td><div class="cell-stack"><span>${escapeHtml(time)}</span><small>${escapeHtml(log.request_path || '-')} · ${escapeHtml(requestId)}</small></div></td>
-          <td class="monospace">${escapeHtml(log.client_ip || '-')}</td>
+          <td><div class="cell-stack"><span>${escapeHtml(log.api_key_name || '未鉴权')}</span><small class="monospace">${escapeHtml(log.client_ip || '-')}</small></div></td>
           <td><div class="cell-stack"><span>${escapeHtml(log.account_name || '-')}</span><small>${attemptCount || 1} 次尝试</small></div></td>
           <td><div class="cell-stack"><span>${escapeHtml(log.requested_model || '-')}</span><small>${escapeHtml(log.upstream_model || '-')}</small></div></td>
           <td><div class="token-pair"><span>输入 <strong>${formatNumber(log.input_tokens)}</strong></span><span>输出 <strong>${formatNumber(log.output_tokens)}</strong></span></div></td>
           <td class="monospace">${formatCost(log.cost)}</td>
-          <td>${formatDuration(log.duration_ms)}</td>
+          <td><div class="token-pair"><span>首字 <strong>${log.first_token_ms == null ? '-' : (Number(log.first_token_ms) / 1000).toFixed(2) + 's'}</strong></span><span>耗时 <strong>${log.duration_ms == null ? '-' : (Number(log.duration_ms) / 1000).toFixed(2) + 's'}</strong></span></div></td>
           <td><span class="status-label ${successful ? 'enabled' : 'disabled'}" title="${escapeHtml(statusTitle)}">${escapeHtml(log.status || 'Error')}</span></td>
         </tr>`;
       }).join('');
@@ -609,12 +693,13 @@
     const snapshots = state.statusSnapshots;
     const latestSnapshot = snapshots[0];
     const accounts = new Map();
-    for (const snapshot of snapshots) {
-      for (const result of snapshot.results || []) {
-        const account = accounts.get(result.account_id) || { id: result.account_id, name: result.account_name, targets: new Map() };
-        if (!account.targets.has(result.model)) account.targets.set(result.model, result);
-        accounts.set(result.account_id, account);
+    for (const source of state.accounts.filter(account => account.enabled !== false)) {
+      const targets = new Map();
+      for (const model of source.models || []) targets.set(`direct:${model}`, { model, label: model });
+      for (const [clientModel, upstreamModel] of Object.entries(source.model_map || {})) {
+        targets.set(`map:${clientModel}`, { model: upstreamModel, label: `${clientModel} → ${upstreamModel}` });
       }
+      accounts.set(source.id, { id: source.id, name: source.name, targets });
     }
     const accountFilter = byId('statusAccount');
     const selectedAccount = accountFilter.value;
@@ -622,7 +707,8 @@
       .map(account => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`).join('');
     accountFilter.value = accounts.has(selectedAccount) ? selectedAccount : '';
 
-    const latestResults = (latestSnapshot?.results || []).filter(result => !accountFilter.value || result.account_id === accountFilter.value);
+    const latestResults = (latestSnapshot?.results || []).filter(result => accounts.has(result.account_id)
+      && (!accountFilter.value || result.account_id === accountFilter.value));
     const presentations = latestResults.map(statusPresentation);
     const healthy = presentations.filter(item => item.key === 'healthy').length;
     const warnings = presentations.filter(item => item.key === 'warning').length;
@@ -640,10 +726,19 @@
       const healthyForAccount = accountStates.filter(item => item.key === 'healthy').length;
       const warningForAccount = accountStates.filter(item => item.key === 'warning').length;
       const failedForAccount = accountStates.filter(item => item.key === 'failed').length;
-      const modelItems = [...account.targets].map(([model, target]) => {
-        const latest = latestForAccount.find(result => result.model === model) || target;
+      const modelItems = [...account.targets].map(([targetKey, target]) => {
+        const matches = result => result.account_id === account.id && (result.target_key || `direct:${result.model}`) === targetKey;
+        const latest = latestForAccount.find(matches) || null;
         const current = statusPresentation(latest);
-        const availability = modelAvailability(account.id, model);
+        let total = 0;
+        let healthyCount = 0;
+        for (const snapshot of snapshots) {
+          const result = (snapshot.results || []).find(matches);
+          if (!result) continue;
+          total += 1;
+          if (result.ok === true) healthyCount += 1;
+        }
+        const availability = total ? { total, healthy: healthyCount, rate: Math.round((healthyCount / total) * 100) } : null;
         const availabilityTitle = availability
           ? `可用率 ${availability.rate}%（${availability.healthy}/${availability.total} 次成功）`
           : '暂无可用率数据';
@@ -651,14 +746,14 @@
           ? `<span class="availability-tag" title="${escapeHtml(availabilityTitle)}">${availability.rate}%</span>`
           : '';
         const segments = history.map(snapshot => {
-          const result = (snapshot.results || []).find(item => item.account_id === account.id && item.model === model);
+          const result = (snapshot.results || []).find(matches);
           const presentation = statusPresentation(result);
           const title = `${new Date(snapshot.checked_at).toLocaleString('zh-CN', { hour12: false })} · ${result ? `${presentation.label}${result.error ? ` · ${result.error}` : ''}` : '无数据'}`;
           return `<span class="status-segment ${presentation.key}" title="${escapeHtml(title)}"></span>`;
         }).join('');
         return `<article class="status-model-item">
-          <header><div class="status-model-heading"><strong class="status-model-name" title="${escapeHtml(model)}">${escapeHtml(model)}</strong>${availabilityTag}</div><span class="status-label ${current.key}">${current.label}</span></header>
-          <div class="status-model-meta"><span>${formatDuration(latest.latency_ms)}</span><span title="${escapeHtml(latest.error || '')}">${escapeHtml(latest.error || `HTTP ${latest.status || 0}`)}</span></div>
+          <header><div class="status-model-heading"><strong class="status-model-name" title="${escapeHtml(target.label)}">${escapeHtml(target.label)}</strong>${availabilityTag}</div><span class="status-label ${current.key}">${current.label}</span></header>
+          <div class="status-model-meta"><span>${latest ? formatDuration(latest.latency_ms) : '-'}</span><span title="${escapeHtml(latest?.error || '')}">${escapeHtml(latest ? (latest.error || `HTTP ${latest.status || 0}`) : '等待检测')}</span></div>
           <div class="status-strip">${segments}</div>
         </article>`;
       }).join('');
@@ -697,6 +792,8 @@
     if (normalized === '/admin/usage') return 'usage';
     if (normalized === '/admin/stats') return 'stats';
     if (normalized === '/admin/status') return 'status';
+    if (normalized === '/admin/api-keys') return 'keys';
+    if (normalized === '/admin/pricing') return 'pricing';
     return 'accounts';
   }
 
@@ -714,10 +811,14 @@
       window.history.replaceState({ view: nextView }, '', route.path);
     }
     if (nextView === 'accounts') {
-      loadAccounts();
+      Promise.all([loadAccounts(), loadPricing()]);
+    } else if (nextView === 'keys') {
+      loadApiKeys();
+    } else if (nextView === 'pricing') {
+      loadPricing();
     } else {
       loadAccounts().then(() => {
-        if (nextView === 'usage') loadUsage();
+        if (nextView === 'usage') Promise.all([loadApiKeys(), loadUsage()]);
         if (nextView === 'stats') loadStats();
         if (nextView === 'status') loadStatus();
       });
@@ -755,6 +856,16 @@
     key.type = key.type === 'password' ? 'text' : 'password';
   });
   byId('fetchModelsButton').addEventListener('click', fetchModels);
+  byId('modelPriceFields').addEventListener('click', event => {
+    const button = event.target.closest('[data-price-toggle]');
+    if (!button) return;
+    const row = button.closest('[data-price-model]');
+    const inherited = row.querySelector('[data-price-input]').dataset.inherited === 'true';
+    if (inherited) state.editingPrices[row.dataset.priceModel] = {
+      input: Number(row.querySelector('[data-price-input]').value || 0), output: Number(row.querySelector('[data-price-output]').value || 0),
+    }; else delete state.editingPrices[row.dataset.priceModel];
+    renderPriceFields();
+  });
   form.addEventListener('submit', saveAccount);
   byId('accountsBody').addEventListener('click', event => {
     const button = event.target.closest('[data-action]');
@@ -782,6 +893,34 @@
     loadUsage();
   });
   byId('clearUsageButton').addEventListener('click', clearUsage);
+  byId('addApiKeyButton').addEventListener('click', openApiKeyDialog);
+  byId('closeApiKeyDialog').addEventListener('click', () => byId('apiKeyDialog').close());
+  byId('cancelApiKeyDialog').addEventListener('click', () => byId('apiKeyDialog').close());
+  byId('apiKeyForm').addEventListener('submit', saveApiKey);
+  byId('copyApiKeyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(byId('apiKeySecretValue').textContent); showToast('Key 已复制'); });
+  byId('apiAuthRequired').addEventListener('change', async event => {
+    try { await requestJson('/admin/api-keys/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ required: event.target.checked }) }); }
+    catch (error) { event.target.checked = !event.target.checked; showToast(error.message, true); }
+  });
+  byId('apiKeysBody').addEventListener('click', async event => {
+    const button = event.target.closest('[data-key-action]'); if (!button) return;
+    const key = state.apiKeys.find(item => item.id === button.dataset.id); if (!key) return;
+    try {
+      if (button.dataset.keyAction === 'toggle') await requestJson(`/admin/api-keys?id=${encodeURIComponent(key.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !key.enabled }) });
+      if (button.dataset.keyAction === 'delete' && window.confirm(`撤销 ${key.name}？`)) await requestJson(`/admin/api-keys?id=${encodeURIComponent(key.id)}`, { method: 'DELETE' });
+      await loadApiKeys();
+    } catch (error) { showToast(error.message, true); }
+  });
+  byId('addPriceButton').addEventListener('click', () => { byId('priceForm').reset(); byId('priceDialog').showModal(); });
+  byId('closePriceDialog').addEventListener('click', () => byId('priceDialog').close());
+  byId('cancelPriceDialog').addEventListener('click', () => byId('priceDialog').close());
+  byId('priceForm').addEventListener('submit', saveGlobalPrice);
+  byId('pricingBody').addEventListener('click', async event => {
+    const button = event.target.closest('[data-price-action]'); if (!button) return;
+    const model = button.dataset.model; const price = state.globalPrices[model];
+    if (button.dataset.priceAction === 'edit') { byId('globalPriceModel').value = model; byId('globalPriceInput').value = price.input; byId('globalPriceOutput').value = price.output; byId('priceDialog').showModal(); return; }
+    if (window.confirm(`删除 ${model} 的全局价格？`)) { await requestJson(`/admin/pricing?model=${encodeURIComponent(model)}`, { method: 'DELETE' }); await loadPricing(); }
+  });
   byId('refreshStatsButton').addEventListener('click', loadStats);
   document.querySelectorAll('[data-stats-range]').forEach(button => button.addEventListener('click', () => {
     state.statsRange = button.dataset.statsRange;

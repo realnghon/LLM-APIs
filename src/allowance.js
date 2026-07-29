@@ -7,6 +7,8 @@ function remaining(account) {
 }
 
 function hasRemainingAllowance(account) {
+  const expiresAt = account?.allowance?.quota_expires_at;
+  if (expiresAt && expiresAt < new Date().toISOString().slice(0, 10)) return false;
   return remaining(account) > 0;
 }
 

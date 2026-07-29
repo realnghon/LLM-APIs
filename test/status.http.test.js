@@ -71,7 +71,6 @@ test('status checks cover every account model and never enter usage history', as
 test('status checks discover added models and deleting an account resets its history', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-apis-status-delete-'));
   const dataFile = path.join(directory, 'kv.json');
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
 
   const app = await startTestServer(createHttpHandler({
     credentials: { username: 'admin', password: 'password' },
@@ -80,7 +79,10 @@ test('status checks discover added models and deleting an account resets its his
       model, label: model, ok: true, status: 200, latency_ms: 25, error: '',
     })),
   }));
-  t.after(app.close);
+  t.after(async () => {
+    await app.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
   const cookie = await login(app.baseUrl);
   const account = {
     id: 'account-reused', name: 'Mutable Account', base_url: 'https://example.com/v1',
@@ -110,6 +112,12 @@ test('status checks discover added models and deleting an account resets its his
 
   assert.equal((await saveAccount(['model-a', 'model-b'])).status, 200);
   assert.deepEqual((await runStatus()).results.map(result => result.model), ['model-a', 'model-b']);
+
+  assert.equal((await saveAccount(['model-a'])).status, 200);
+  const afterModelDelete = await getStatus();
+  assert.equal(afterModelDelete.snapshots.flatMap(snapshot => snapshot.results)
+    .some(result => result.account_id === account.id && result.model === 'model-b'), false);
+  assert.deepEqual((await runStatus()).results.map(result => result.model), ['model-a']);
 
   const deleted = await fetch(`${app.baseUrl}/admin/accounts?id=${account.id}`, {
     method: 'DELETE', headers: { Cookie: cookie },

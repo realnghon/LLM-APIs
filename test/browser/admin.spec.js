@@ -14,7 +14,7 @@ test('admin can log in and open the streamlined account editor', async ({ page }
   await expect(page.getByRole('heading', { level: 1, name: '账号管理' })).toBeVisible();
   const navDecorations = await page.locator('.sidebar nav .nav-item').evaluateAll(items =>
     items.map(item => getComputedStyle(item).textDecorationLine));
-  expect(navDecorations).toEqual(['none', 'none', 'none', 'none']);
+  expect(navDecorations).toEqual(['none', 'none', 'none', 'none', 'none', 'none']);
   await page.getByRole('button', { name: '新增账号' }).click();
 
   const editor = page.getByRole('dialog', { name: '新增账号' });
@@ -33,8 +33,13 @@ test('admin can log in and open the streamlined account editor', async ({ page }
   await editor.getByRole('tab', { name: '价格' }).click();
   await expect(editor.getByLabel('model-a 输入单价')).toBeVisible();
   await expect(editor.getByLabel('model-a 输出单价')).toBeVisible();
+  await editor.getByRole('button', { name: '覆盖' }).click();
   await editor.getByLabel('model-a 输入单价').fill('1.5');
   await editor.getByLabel('model-a 输出单价').fill('6');
+  await editor.getByRole('tab', { name: '连接' }).click();
+  await editor.getByRole('tab', { name: '价格' }).click();
+  await expect(editor.getByLabel('model-a 输入单价')).toHaveValue('1.5');
+  await expect(editor.getByLabel('model-a 输出单价')).toHaveValue('6');
   await editor.getByRole('button', { name: '保存账号' }).click();
 
   await expect(editor).not.toBeVisible();
@@ -56,7 +61,7 @@ test('manual account check shows every model result in a dialog', async ({ page 
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ success: true, name: 'Check Dialog', results: [
-        { label: 'model-a(原始)', model: 'model-a', ok: true, status: 200, latency_ms: 80, error: '' },
+        { label: 'model-a(原始)', model: 'model-a', ok: false, status: 500, latency_ms: 80, error: '<img src=x onerror=window.__xss=1>' },
       ] }),
     });
   });
@@ -71,7 +76,8 @@ test('manual account check shows every model result in a dialog', async ({ page 
   await dialog.getByRole('button', { name: '开始检测' }).click();
   await expect.poll(() => submittedIndices).toEqual([0]);
   await expect(dialog.getByText('model-a(原始)')).toBeVisible();
-  await expect(dialog.getByText('正常', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('<img src=x onerror=window.__xss=1>', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
 });
 
 test('status page exposes scheduling controls and account-model timeline', async ({ page }) => {
@@ -90,6 +96,12 @@ test('status page exposes scheduling controls and account-model timeline', async
         { account_id: 'b', account_name: 'Account B', model: 'model-third', ok: true, status: 200, latency_ms: 70, error: '' },
       ],
     }] }),
+  }));
+  await page.route('**/admin/accounts', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, accounts: [
+      { id: 'a', name: 'Account A', enabled: true, models: ['model-primary', 'model-secondary', 'model-slow', 'model-timeout'], model_map: {} },
+      { id: 'b', name: 'Account B', enabled: true, models: ['model-third'], model_map: {} },
+    ] }),
   }));
   await page.locator('[data-view="status"]').click();
 
@@ -229,7 +241,7 @@ test('usage records expose filters and unambiguous request details', async ({ pa
     body: JSON.stringify({ success: true, total: 1, stats: { success_count: 1, error_count: 0 }, logs: [{
       id: 'usage-duration', request_id: 'usage-duration', account_name: 'Account A', requested_model: 'model-a',
       upstream_model: 'model-a', request_path: '/v1/chat/completions', client_ip: '127.0.0.1', status: 200,
-      duration_ms: 2350, input_tokens: 10, output_tokens: 5, cost: 0.001, attempts: [{}], created_at: new Date().toISOString(),
+      duration_ms: 2350, first_token_ms: 720, api_key_name: 'Client A', input_tokens: 10, output_tokens: 5, cost: 0.001, attempts: [{}], created_at: new Date().toISOString(),
     }] }),
     });
   });
@@ -254,9 +266,37 @@ test('usage records expose filters and unambiguous request details', async ({ pa
   await expect(page.getByLabel('结束日期')).toBeVisible();
   await expect(page.getByLabel('请求状态')).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '输入 / 输出 Tokens' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: '调用者 IP' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Key / 调用者 IP' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '费用' })).toBeVisible();
-  await expect(page.getByText('2.35 s', { exact: true })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '首字 / 耗时' })).toBeVisible();
+  await expect(page.getByText('0.72s', { exact: true })).toBeVisible();
+  await expect(page.getByText('2.35s', { exact: true })).toBeVisible();
+});
+
+test('API key and global pricing pages support the lightweight workflow', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('password');
+  await page.getByRole('button', { name: '登录' }).click();
+  await page.locator('[data-view="pricing"]').click();
+  await expect(page).toHaveURL(/\/admin\/pricing$/);
+  await page.getByRole('button', { name: '新增价格' }).click();
+  const priceDialog = page.getByRole('dialog', { name: '模型价格' });
+  await priceDialog.getByLabel('模型').fill('shared-model');
+  await priceDialog.getByLabel('输入 $ / 1M Tokens').fill('1.25');
+  await priceDialog.getByLabel('输出 $ / 1M Tokens').fill('5');
+  await priceDialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.getByText('shared-model', { exact: true })).toBeVisible();
+
+  await page.locator('[data-view="keys"]').click();
+  await expect(page).toHaveURL(/\/admin\/api-keys$/);
+  await page.getByRole('button', { name: '创建 Key' }).click();
+  const keyDialog = page.getByRole('dialog', { name: '创建 API Key' });
+  await keyDialog.getByLabel('名称').fill('Browser Client');
+  await keyDialog.getByLabel('模型白名单').fill('shared-model');
+  await keyDialog.getByRole('button', { name: '创建' }).click();
+  await expect(keyDialog.getByText('请立即保存这个 Key')).toBeVisible();
+  await expect(keyDialog.locator('code')).toContainText('llm_');
 });
 
 test('usage summary is presented without metric cards', async ({ page }) => {

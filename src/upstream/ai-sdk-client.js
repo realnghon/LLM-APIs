@@ -22,9 +22,9 @@ async function mapConcurrent(items, maximum, worker) {
 }
 
 function testItems(account) {
-  const items = (account.models || []).map(model => ({ label: `${model}（原始）`, model }));
+  const items = (account.models || []).map(model => ({ target_key: `direct:${model}`, label: `${model}（原始）`, model }));
   for (const [clientModel, upstreamModel] of Object.entries(account.model_map || {})) {
-    items.push({ label: `${clientModel} → ${upstreamModel}`, model: upstreamModel });
+    items.push({ target_key: `map:${clientModel}`, label: `${clientModel} → ${upstreamModel}`, model: upstreamModel });
   }
   return items;
 }

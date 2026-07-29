@@ -39,12 +39,14 @@ function providerFor(account) {
   });
 }
 
-function callOptions(account, body, upstreamModel) {
+function callOptions(account, body, upstreamModel, signal) {
   const options = {
     model: providerFor(account)(upstreamModel),
     messages: messagesForSdk(body.messages),
     maxOutputTokens: Number(body.max_tokens || body.max_completion_tokens || 4096),
-    abortSignal: AbortSignal.timeout(Math.max(100, Number(account.request_timeout_ms || 120_000))),
+    abortSignal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(100, Number(account.request_timeout_ms || 120_000)))])
+      : AbortSignal.timeout(Math.max(100, Number(account.request_timeout_ms || 120_000))),
   };
   const system = systemForSdk(body.messages);
   if (system) options.system = system;
@@ -93,8 +95,8 @@ function streamResponse(result, requestedModel) {
   });
 }
 
-async function proxyAnthropic({ account, body, requestedModel, upstreamModel }) {
-  const options = callOptions(account, body, upstreamModel);
+async function proxyAnthropic({ account, body, requestedModel, upstreamModel, signal }) {
+  const options = callOptions(account, body, upstreamModel, signal);
   if (body.stream === true) return streamResponse(streamText(options), requestedModel);
   const result = await generateText(options);
   return Response.json(openAIResponse(result, requestedModel));

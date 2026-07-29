@@ -24,7 +24,9 @@ function createFileUsageRepository(dataFile, options = {}) {
   const usageDir = path.dirname(dataFile);
   const baseName = path.basename(dataFile, extension);
   const usageFile = options.usageFile || path.join(usageDir, `${baseName}.usage.ndjson`);
-  const archivePattern = new RegExp(`^${baseName}\.usage-(\d{4}-\d{2})\.ndjson$`);
+  const escapedBaseName = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const archivePattern = new RegExp(`^${escapedBaseName}\\.usage-(\\d{4}-\\d{2})\\.ndjson$`);
+  const retention = positiveInteger(options.retention ?? process.env.USAGE_RETENTION, 100_000);
   let logs = null;
   let loadPromise = null;
   let writeQueue = Promise.resolve();
@@ -129,7 +131,10 @@ function createFileUsageRepository(dataFile, options = {}) {
           if (logs.length) await replaceFile(usageFile, logs);
         }
         return logs;
-      })();
+      })().catch(error => {
+        loadPromise = null;
+        throw error;
+      });
     }
     return loadPromise;
   }
@@ -170,6 +175,7 @@ function createFileUsageRepository(dataFile, options = {}) {
         await fs.mkdir(path.dirname(usageFile), { recursive: true });
         await fs.appendFile(usageFile, `${JSON.stringify(entry)}\n`);
         logs.unshift(entry);
+        if (logs.length > retention) logs.length = retention;
         
         const now = new Date();
         const shouldArchive = !lastArchiveCheck || 

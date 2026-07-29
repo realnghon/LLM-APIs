@@ -12,11 +12,16 @@ const { createMemoryUsageRepository, createUsageHandler } = require('./usage');
 const { createMemoryStatusRepository, createStatusHandler, createStatusMonitor } = require('./status');
 const { createFileStatusRepository } = require('./storage/file-status-repository');
 const { createCoreHandler } = require('./core');
+const { createSqliteStore } = require('./storage/sqlite-store');
+const { bearerToken, createApiKeyRepository, createApiKeysHandler } = require('./api-keys');
+const { createPricingHandler } = require('./pricing');
+const { createLogger } = require('./logger');
+const { once } = require('events');
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 };
 
 function withCors(response) {
@@ -53,12 +58,13 @@ function json(body, status) {
 function createWebHandler(options = {}) {
   const auth = createAuth(options.credentials || loadAdminCredentials(options.configPath));
   const dataFile = options.dataFile || process.env.DATA_FILE || require('path').join(__dirname, '..', 'apis-data', 'kv.json');
-  const accountRepository = options.accountRepository || createFileAccountRepository(dataFile);
-  const usageRepository = options.usageRepository || (options.accountRepository
+  const store = options.store || (!options.accountRepository ? createSqliteStore(dataFile, options) : null);
+  const accountRepository = options.accountRepository || store?.accountRepository || createFileAccountRepository(dataFile);
+  const usageRepository = options.usageRepository || store?.usageRepository || (options.accountRepository
     ? createMemoryUsageRepository()
     : createFileUsageRepository(dataFile, { retention: options.usageRetention }));
   const appHandler = options.appHandler || createCoreHandler(accountRepository);
-  const statusRepository = options.statusRepository || (options.accountRepository
+  const statusRepository = options.statusRepository || store?.statusRepository || (options.accountRepository
     ? createMemoryStatusRepository()
     : createFileStatusRepository(dataFile));
   const statusMonitor = options.statusMonitor || createStatusMonitor({
@@ -67,6 +73,10 @@ function createWebHandler(options = {}) {
     testAccountFn: options.accountTester,
   });
   const accountsHandler = createAccountsHandler(accountRepository, { statusRepository });
+  const apiKeySettings = options.apiKeySettingsRepository || store?.settingsRepository || null;
+  const apiKeyRepository = options.apiKeyRepository || (store ? createApiKeyRepository(store.db, apiKeySettings) : null);
+  const apiKeysHandler = apiKeyRepository && apiKeySettings && createApiKeysHandler(apiKeyRepository, apiKeySettings);
+  const pricingHandler = store && createPricingHandler(store.priceRepository, accountRepository);
   const usageHandler = createUsageHandler(usageRepository);
   const statusHandler = createStatusHandler(statusMonitor);
   const proxyHandler = createProxyHandler({
@@ -76,13 +86,36 @@ function createWebHandler(options = {}) {
     random: options.random,
   });
 
-  return async function handle(request) {
+  async function handle(request) {
     const url = new URL(request.url);
     const isAdmin = url.pathname === '/admin' || url.pathname === '/admin/' || url.pathname.startsWith('/admin/');
     const isPublicApi = url.pathname.startsWith('/v1/') || url.pathname.startsWith('/v3/');
 
     if (isPublicApi && request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    if (isPublicApi && apiKeyRepository) {
+      const required = apiKeySettings?.get('api_auth_required', false) === true;
+      const token = bearerToken(request);
+      const key = token ? await apiKeyRepository.authenticate(token) : null;
+      if ((required && !key) || (token && !key)) return withCors(Response.json({ error: { message: 'Invalid or missing API key', type: 'authentication_error' } }, {
+        status: 401, headers: { 'WWW-Authenticate': 'Bearer' },
+      }));
+      if (!key) {
+        request.apiKey = null;
+      } else {
+        const allowedModels = key.models || [];
+        if (request.method === 'POST' && allowedModels.length) {
+          const clone = request.clone();
+          let model = '';
+          try { model = String((await clone.json()).model || ''); } catch {}
+          if (model && !allowedModels.some(item => item.toLowerCase() === model.toLowerCase())) {
+            return withCors(Response.json({ error: { message: `Model '${model}' is not allowed for this API key` } }, { status: 403 }));
+          }
+        }
+        request.apiKey = key;
+      }
     }
 
     if (url.pathname.startsWith('/assets/')) {
@@ -121,6 +154,16 @@ function createWebHandler(options = {}) {
       if (response) return response;
     }
 
+    if (apiKeysHandler) {
+      const response = await apiKeysHandler(request);
+      if (response) return response;
+    }
+
+    if (pricingHandler) {
+      const response = await pricingHandler(request);
+      if (response) return response;
+    }
+
     if (statusHandler) {
       const response = await statusHandler(request);
       if (response) return response;
@@ -138,10 +181,15 @@ function createWebHandler(options = {}) {
 
     const response = await appHandler(request);
     return isPublicApi ? withCors(response) : response;
+  }
+  handle.dispose = async () => {
+    statusMonitor.dispose?.();
+    store?.close();
   };
+  return handle;
 }
 
-function requestFromNode(req, body) {
+function requestFromNode(req, body, signal) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const headers = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -152,32 +200,67 @@ function requestFromNode(req, body) {
     method: req.method,
     headers,
     body: body.length ? body : undefined,
+    signal,
   });
 }
 
-async function sendNodeResponse(res, response) {
+async function sendNodeResponse(res, response, signal) {
   const headers = {};
   response.headers.forEach((value, key) => { headers[key] = value; });
   res.writeHead(response.status, headers);
   if (response.body) {
-    for await (const chunk of response.body) res.write(chunk);
+    try {
+      for await (const chunk of response.body) {
+        if (signal.aborted || res.destroyed) break;
+        if (!res.write(chunk)) await Promise.race([once(res, 'drain'), once(res, 'close')]);
+      }
+    } finally {
+      if (signal.aborted || res.destroyed) await response.body.cancel(signal.reason).catch(() => {});
+    }
   }
-  res.end();
+  if (!res.destroyed) res.end();
 }
 
 function createHttpHandler(options = {}) {
   const handle = createWebHandler(options);
-  return async function httpHandler(req, res) {
+  const logger = options.logger || createLogger();
+  const configuredBodyBytes = Number(options.maximumBodyBytes || process.env.MAX_REQUEST_BODY_BYTES);
+  const maximumBodyBytes = Number.isFinite(configuredBodyBytes)
+    ? Math.max(1024, configuredBodyBytes)
+    : 10 * 1024 * 1024;
+  async function httpHandler(req, res) {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const abort = () => controller.abort(new Error('downstream disconnected'));
+    req.once('aborted', abort);
+    res.once('close', () => { if (!res.writableEnded) abort(); });
     try {
       const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const request = requestFromNode(req, Buffer.concat(chunks));
-      await sendNodeResponse(res, await handle(request));
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > maximumBodyBytes) {
+          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
+          res.end(JSON.stringify({ error: { message: 'Request body too large' } }));
+          return;
+        }
+        chunks.push(chunk);
+      }
+      const request = requestFromNode(req, Buffer.concat(chunks), controller.signal);
+      const response = await handle(request);
+      await sendNodeResponse(res, response, controller.signal);
+      logger.debug('request_completed', { method: req.method, path: req.url, status: response.status, duration_ms: Date.now() - startedAt });
     } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: error.message }));
+      logger.error('request_failed', { method: req.method, path: req.url, duration_ms: Date.now() - startedAt, error: error.message, stack: error.stack });
+      if (res.headersSent) res.destroy(error);
+      else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: 'Internal server error' } }));
+      }
     }
-  };
+  }
+  httpHandler.dispose = handle.dispose;
+  return httpHandler;
 }
 
 module.exports = { createHttpHandler, createWebHandler };
