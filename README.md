@@ -2,7 +2,7 @@
 
 轻量级本地大语言模型 API 网关，支持多账号路由、自动故障转移、API Key、SQLite 持久化和用量监控。
 
-## 2.0 升级说明
+## 版本说明
 
 - 最低运行版本升级为 Node.js 22.13。
 - 默认端口为 `8787`，运行参数集中在 `config/service.json`。
@@ -67,7 +67,7 @@ PowerShell 中可使用 `New-Item -ItemType Directory ../llm-apis-backup -Force`
 
 升级失败时，先停止新版本，恢复旧程序目录及整份 `apis-data` 备份，再启动旧版本。不要在服务运行时只复制 `kv.sqlite`；SQLite 可能同时使用 `kv.sqlite-wal` 和 `kv.sqlite-shm`，停服后备份整个目录最安全。
 
-### 离线环境部署
+### 离线部署
 
 **在联网机器上构建离线包**：
 
@@ -84,7 +84,7 @@ npm run build:offline
 
 ```bash
 # 1. 解压离线包
-    tar -xzf llm-apis-v2.2.0-offline-20260730.tar.gz
+tar -xzf llm-apis-v2.2.0-offline-20260730.tar.gz
 
 # 2. 进入目录
 cd LLM-APIs
@@ -100,9 +100,9 @@ npm start
 > [!WARNING]
 > 新安装完成后请先创建客户端 Key，并在“API Keys”页面开启强制鉴权。未开启时 API 路由允许匿名访问，请仅在可信网络中运行。
 
-## 添加上游账号
+## 配置上游账号
 
-登录管理后台，在"账号管理"页面点击"新增账号"，填写上游 API 信息：
+登录管理后台，在“账号管理”页面点击“新增账号”，填写上游 API 信息：
 
 - **账号名称**：后台显示名称
 - **请求格式**：OpenAI Compatible 或 Anthropic
