@@ -7,8 +7,8 @@ const path = require('path');
 const test = require('node:test');
 const { loadAdminCredentials, loadServiceConfig, loadServicePort } = require('../src/config');
 
-test('service defaults to port 8586 and allows an environment override', () => {
-  assert.equal(loadServicePort({}), 8586);
+test('service defaults to port 8787 and allows an environment override', () => {
+  assert.equal(loadServicePort({}), 8787);
   assert.equal(loadServicePort({ PORT: '4321' }), 4321);
 });
 

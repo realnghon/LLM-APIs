@@ -23,12 +23,12 @@ async function startUpstream(respond) {
   };
 }
 
-test('proxy times out a stalled account and fails over to the same model on another account', async t => {
+test('proxy ignores legacy account timeouts and lets a long request finish', async t => {
   const stalled = await startUpstream(async (_req, res) => {
     await new Promise(resolve => setTimeout(resolve, 200));
     if (res.destroyed) return;
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ choices: [] }));
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'slow but complete' } }] }));
   });
   const healthy = await startUpstream((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -54,9 +54,9 @@ test('proxy times out a stalled account and fails over to the same model on anot
     body: JSON.stringify({ model: 'model-a', messages: [{ role: 'user', content: 'hello' }] }),
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).choices[0].message.content, 'healthy');
+  assert.equal((await response.json()).choices[0].message.content, 'slow but complete');
   assert.equal(stalled.requests(), 1);
-  assert.equal(healthy.requests(), 1);
+  assert.equal(healthy.requests(), 0);
 });
 
 test('proxy fails over to the next account without retrying the failed account', async t => {

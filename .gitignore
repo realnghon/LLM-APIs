@@ -21,6 +21,7 @@ node_modules/
 test-results/
 playwright-report/
 coverage/
+llm-apis-v*-offline-*.tar.gz
 
 # 操作系统与编辑器
 .DS_Store

@@ -62,9 +62,7 @@ function callOptions(account, body, upstreamModel, signal) {
     model: providerFor(account)(upstreamModel),
     messages: messagesForSdk(body.messages),
     maxOutputTokens: Number(body.max_tokens || body.max_completion_tokens || 4096),
-    abortSignal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(100, Number(account.request_timeout_ms || 120_000)))])
-      : AbortSignal.timeout(Math.max(100, Number(account.request_timeout_ms || 120_000))),
+    ...(signal ? { abortSignal: signal } : {}),
   };
   const system = systemForSdk(body.messages);
   if (system) options.system = system;

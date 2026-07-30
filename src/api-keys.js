@@ -6,9 +6,22 @@ function digest(secret) { return crypto.createHash('sha256').update(String(secre
 function response(body, status = 200) { return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } }); }
 
 function createApiKeyRepository(db, settingsRepository) {
+  function createSecret() {
+    const prefix = crypto.randomBytes(5).toString('hex');
+    return { prefix, secret: `llm_${prefix}_${crypto.randomBytes(32).toString('base64url')}` };
+  }
+
   function sanitized(row) {
     if (!row) return null;
-    return { ...row, enabled: row.enabled === 1, models: JSON.parse(row.models || '[]'), secret_hash: undefined, masked_key: `llm_${row.prefix}_...` };
+    return {
+      ...row,
+      enabled: row.enabled === 1,
+      models: JSON.parse(row.models || '[]'),
+      secret_hash: undefined,
+      secret_value: undefined,
+      key: row.secret_value || undefined,
+      masked_key: `llm_${row.prefix}_...`,
+    };
   }
   return {
     async list() { return db.prepare('SELECT * FROM api_keys ORDER BY created_at DESC').all().map(sanitized); },
@@ -19,14 +32,21 @@ function createApiKeyRepository(db, settingsRepository) {
     async count() { return Number(db.prepare('SELECT COUNT(*) AS value FROM api_keys').get().value); },
     async create(input) {
       const id = `key_${crypto.randomUUID()}`;
-      const prefix = crypto.randomBytes(5).toString('hex');
-      const secret = `llm_${prefix}_${crypto.randomBytes(32).toString('base64url')}`;
+      const { prefix, secret } = createSecret();
       const now = new Date().toISOString();
-      db.prepare('INSERT INTO api_keys(id, name, prefix, secret_hash, enabled, expires_at, models, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)')
-        .run(id, String(input.name || '未命名 Key').trim(), prefix, digest(secret), String(input.expires_at || ''), JSON.stringify(Array.isArray(input.models) ? input.models : []), now, now);
+      db.prepare('INSERT INTO api_keys(id, name, prefix, secret_hash, secret_value, enabled, expires_at, models, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)')
+        .run(id, String(input.name || '未命名 Key').trim(), prefix, digest(secret), secret, String(input.expires_at || ''), JSON.stringify(Array.isArray(input.models) ? input.models : []), now, now);
       return { ...(await this.findById(id)), key: secret };
     },
     async findById(id) { return sanitized(db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id)); },
+    async rotate(id) {
+      const row = db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id);
+      if (!row) return null;
+      const { prefix, secret } = createSecret();
+      db.prepare('UPDATE api_keys SET prefix = ?, secret_hash = ?, secret_value = ?, updated_at = ? WHERE id = ?')
+        .run(prefix, digest(secret), secret, new Date().toISOString(), id);
+      return this.findById(id);
+    },
     async update(id, input) {
       const row = db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id);
       if (!row) return null;
@@ -72,7 +92,8 @@ function createApiKeysHandler(repository, settingsRepository) {
     if (request.method === 'POST') return response({ success: true, api_key: await repository.create(await request.json()) }, 201);
     if (request.method === 'PATCH') {
       const id = url.searchParams.get('id');
-      const key = id && await repository.update(id, await request.json());
+      const input = await request.json();
+      const key = id && (input.rotate === true ? await repository.rotate(id) : await repository.update(id, input));
       return key ? response({ success: true, api_key: key }) : response({ success: false, error: 'Key not found' }, 404);
     }
     if (request.method === 'DELETE') {

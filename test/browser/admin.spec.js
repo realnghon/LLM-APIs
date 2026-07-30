@@ -28,7 +28,8 @@ test('admin can log in and open the streamlined account editor', async ({ page }
   await expect(editor.getByLabel('优先级')).toHaveCount(0);
   await expect(editor.getByLabel('权重')).toHaveCount(0);
   await editor.getByRole('tab', { name: '路由' }).click();
-  await expect(editor.getByText('系统会优先选择当前负载较低的可用账号，并在网络错误、超时或限流时自动切换。')).toBeVisible();
+  await expect(editor.getByText('系统会优先选择当前负载较低的可用账号，并在网络错误、限流或上游异常时自动切换。')).toBeVisible();
+  await expect(editor.getByLabel('请求超时（秒）')).toHaveCount(0);
   await editor.getByRole('tab', { name: '连接' }).click();
 
   await editor.getByLabel('账号名称').fill('Browser Account');
@@ -308,6 +309,12 @@ test('API key and global pricing pages support the lightweight workflow', async 
   await keyDialog.getByRole('button', { name: '创建' }).click();
   await expect(keyDialog.getByText('请立即保存这个 Key')).toBeVisible();
   await expect(keyDialog.locator('code')).toContainText('llm_');
+  await page.evaluate(() => { delete navigator.clipboard; document.execCommand = command => command === 'copy'; });
+  await keyDialog.getByRole('button', { name: '复制' }).click();
+  await expect(page.locator('#toast')).toHaveText('Key 已复制');
+  await keyDialog.getByRole('button', { name: '关闭' }).click();
+  await page.getByRole('button', { name: '复制 Browser Client' }).click();
+  await expect(page.locator('#toast')).toHaveText('Key 已复制');
 });
 
 test('usage summary is presented without metric cards', async ({ page }) => {

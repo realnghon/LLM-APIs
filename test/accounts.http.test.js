@@ -47,6 +47,7 @@ test('account management discards removed pool and shared allowance settings', a
       pool_mode: true,
       pool_mode_retry_count: 5,
       pool_retry_statuses: [401, 429],
+      request_timeout_ms: 1000,
       allowance: { type: 'shared', shared_group_name: 'old-pool' },
     }),
   });
@@ -66,5 +67,6 @@ test('account management discards removed pool and shared allowance settings', a
   assert.equal(body.accounts[0].pool_mode, undefined);
   assert.equal(body.accounts[0].pool_mode_retry_count, undefined);
   assert.equal(body.accounts[0].pool_retry_statuses, undefined);
+  assert.equal(body.accounts[0].request_timeout_ms, undefined);
   assert.equal(body.allowance_config.shared_groups, undefined);
 });

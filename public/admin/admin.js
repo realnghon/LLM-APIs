@@ -212,7 +212,7 @@
   function renderApiKeys() {
     byId('apiKeysEmpty').classList.toggle('is-visible', state.apiKeys.length === 0);
     byId('apiKeysBody').innerHTML = state.apiKeys.map(key => `<tr>
-      <td><strong>${escapeHtml(key.name)}</strong></td><td class="monospace">${escapeHtml(key.masked_key)}</td>
+      <td><strong>${escapeHtml(key.name)}</strong></td><td><div class="key-value"><span class="monospace">${escapeHtml(key.masked_key)}</span><button class="icon-button" data-key-action="copy" data-id="${escapeHtml(key.id)}" title="${key.key ? '复制 Key' : '重新生成后复制'}" aria-label="${key.key ? '复制' : '重新生成并复制'} ${escapeHtml(key.name)}">${icon('copy')}</button></div></td>
       <td>${key.models?.length ? key.models.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join(' ') : '全部模型'}</td>
       <td>${key.expires_at ? escapeHtml(new Date(key.expires_at).toLocaleString('zh-CN', { hour12: false })) : '永不过期'}</td>
       <td><span class="status-label ${key.enabled ? 'enabled' : 'disabled'}">${key.enabled ? '启用' : '停用'}</span></td>
@@ -257,6 +257,25 @@
     } catch (error) { showToast(error.message, true); }
   }
 
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch { /* fall back for HTTP pages and denied clipboard permissions */ }
+    }
+    const input = document.createElement('textarea');
+    input.value = text;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand('copy');
+    input.remove();
+    if (!copied) throw new Error('复制失败');
+  }
+
   async function saveGlobalPrice(event) {
     event.preventDefault();
     try {
@@ -292,7 +311,6 @@
     byId('accountModels').value = (account?.models || []).join('\n');
     byId('accountModelMap').value = modelMapToText(account?.model_map);
     byId('accountConcurrency').value = account?.max_concurrency || 0;
-    byId('accountTimeout').value = Number(account?.request_timeout_ms || 120000) / 1000;
     byId('accountEnabled').checked = account?.enabled !== false;
     byId('accountNote').value = account?.note || '';
     state.editingPrices = JSON.parse(JSON.stringify(account?.model_price_overrides || {}));
@@ -326,7 +344,6 @@
       models: [...new Set(byId('accountModels').value.split('\n').map(value => value.trim()).filter(Boolean))],
       model_map: modelMapFromText(byId('accountModelMap').value),
       max_concurrency: Number(byId('accountConcurrency').value || 0),
-      request_timeout_ms: Number(byId('accountTimeout').value || 120) * 1000,
       enabled: byId('accountEnabled').checked,
       note: byId('accountNote').value.trim(),
       model_price_overrides: capturePrices(),
@@ -920,7 +937,12 @@
   byId('closeApiKeyDialog').addEventListener('click', () => byId('apiKeyDialog').close());
   byId('cancelApiKeyDialog').addEventListener('click', () => byId('apiKeyDialog').close());
   byId('apiKeyForm').addEventListener('submit', saveApiKey);
-  byId('copyApiKeyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(byId('apiKeySecretValue').textContent); showToast('Key 已复制'); });
+  byId('copyApiKeyButton').addEventListener('click', async () => {
+    try {
+      await copyText(byId('apiKeySecretValue').textContent);
+      showToast('Key 已复制');
+    } catch (error) { showToast(error.message || '复制失败', true); }
+  });
   byId('apiAuthRequired').addEventListener('change', async event => {
     try { await requestJson('/admin/api-keys/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ required: event.target.checked }) }); }
     catch (error) { event.target.checked = !event.target.checked; showToast(error.message, true); }
@@ -929,6 +951,18 @@
     const button = event.target.closest('[data-key-action]'); if (!button) return;
     const key = state.apiKeys.find(item => item.id === button.dataset.id); if (!key) return;
     try {
+      if (button.dataset.keyAction === 'copy') {
+        let secret = key.key;
+        if (!secret) {
+          if (!window.confirm(`${key.name} 创建于旧版本，原 Key 无法恢复。是否重新生成？旧 Key 将立即失效。`)) return;
+          const data = await requestJson(`/admin/api-keys?id=${encodeURIComponent(key.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rotate: true }) });
+          secret = data.api_key.key;
+        }
+        await copyText(secret);
+        showToast(key.key ? 'Key 已复制' : '新 Key 已生成并复制');
+        await loadApiKeys();
+        return;
+      }
       if (button.dataset.keyAction === 'toggle') await requestJson(`/admin/api-keys?id=${encodeURIComponent(key.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !key.enabled }) });
       if (button.dataset.keyAction === 'delete' && window.confirm(`撤销 ${key.name}？`)) await requestJson(`/admin/api-keys?id=${encodeURIComponent(key.id)}`, { method: 'DELETE' });
       await loadApiKeys();

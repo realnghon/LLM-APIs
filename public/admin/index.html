@@ -194,11 +194,8 @@
       </div>
 
       <div class="tab-panel" data-tab-panel="routing" role="tabpanel" hidden>
-        <p class="field-hint">系统会优先选择当前负载较低的可用账号，并在网络错误、超时或限流时自动切换。</p>
-        <div class="field-grid two-columns">
-          <label class="field"><span>最大并发</span><input id="accountConcurrency" type="number" min="0" value="0"></label>
-          <label class="field"><span>请求超时（秒）</span><input id="accountTimeout" type="number" min="1" max="900" value="120"></label>
-        </div>
+        <p class="field-hint">系统会优先选择当前负载较低的可用账号，并在网络错误、限流或上游异常时自动切换。</p>
+        <label class="field"><span>最大并发</span><input id="accountConcurrency" type="number" min="0" value="0"></label>
         <label class="switch-field"><input id="accountEnabled" type="checkbox" checked><span class="switch"></span><span>启用账号</span></label>
         <label class="field"><span>备注</span><input id="accountNote"></label>
       </div>
@@ -236,7 +233,7 @@
         <label class="field"><span>名称</span><input id="apiKeyName" required placeholder="例如 开发团队"></label>
         <label class="field"><span>到期时间</span><input id="apiKeyExpiry" type="datetime-local"></label>
         <label class="field"><span>模型白名单</span><textarea id="apiKeyModels" placeholder="每行一个模型，留空允许全部模型"></textarea></label>
-        <div class="secret-result" id="apiKeySecret" hidden><strong>请立即保存这个 Key</strong><code id="apiKeySecretValue"></code><button class="button button-secondary" type="button" id="copyApiKeyButton"><i data-lucide="copy"></i>复制</button></div>
+        <div class="secret-result" id="apiKeySecret" hidden><strong>请立即保存这个 Key</strong><div class="secret-key-row"><code id="apiKeySecretValue"></code><button class="button button-secondary" type="button" id="copyApiKeyButton"><i data-lucide="copy"></i>复制</button></div></div>
       </div>
       <footer class="dialog-footer"><button type="button" class="button button-secondary" id="cancelApiKeyDialog">取消</button><button type="submit" class="button button-primary" id="saveApiKeyButton">创建</button></footer>
     </form>

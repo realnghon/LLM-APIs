@@ -5,7 +5,7 @@ const path = require('path');
 
 const DEFAULT_SERVICE_CONFIG = Object.freeze({
   host: '127.0.0.1',
-  port: 8586,
+  port: 8787,
   max_request_body_bytes: 10 * 1024 * 1024,
   headers_timeout_ms: 15_000,
   request_timeout_ms: 300_000,

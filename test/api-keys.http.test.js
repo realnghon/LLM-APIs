@@ -32,8 +32,9 @@ test('API keys protect models and attribute proxy usage', async t => {
   const key = (await created.json()).api_key;
   assert.match(key.key, /^llm_[a-f0-9]{10}_/);
   const listing = await (await fetch(`${app.baseUrl}/admin/api-keys`, { headers: { Cookie: cookie } })).json();
-  assert.equal(listing.keys[0].key, undefined);
+  assert.equal(listing.keys[0].key, key.key);
   assert.equal(listing.keys[0].secret_hash, undefined);
+  assert.equal(listing.keys[0].secret_value, undefined);
   const optionalCall = await fetch(`${app.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'model-a', messages: [] }) });
   assert.equal(optionalCall.status, 200);
   await optionalCall.text();
@@ -52,6 +53,14 @@ test('API keys protect models and attribute proxy usage', async t => {
   const usage = await (await fetch(`${app.baseUrl}/admin/usage?api_key_id=${key.id}`, { headers: { Cookie: cookie } })).json();
   assert.equal(usage.total, 2);
   assert.equal(usage.logs[0].api_key_name, 'Client A');
+
+  const rotated = await (await fetch(`${app.baseUrl}/admin/api-keys?id=${encodeURIComponent(key.id)}`, {
+    method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ rotate: true }),
+  })).json();
+  assert.match(rotated.api_key.key, /^llm_[a-f0-9]{10}_/);
+  assert.notEqual(rotated.api_key.key, key.key);
+  assert.equal((await fetch(`${app.baseUrl}/v1/models`, { headers: { Authorization: `Bearer ${key.key}` } })).status, 401);
+  assert.equal((await fetch(`${app.baseUrl}/v1/models`, { headers: { Authorization: `Bearer ${rotated.api_key.key}` } })).status, 200);
 });
 
 test('legacy account prices remain account overrides during SQLite migration', async t => {

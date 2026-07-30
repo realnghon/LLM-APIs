@@ -60,9 +60,12 @@ function createSseUsageObserver(usage, onFirstToken = () => {}) {
       try {
         const parsed = JSON.parse(data);
         if (parsed.usage && typeof parsed.usage === 'object') Object.assign(usage, parsed.usage);
-        const content = parsed.choices?.some(choice => choice.delta?.content || choice.text)
-          || parsed.delta?.text || parsed.content_block?.text;
-        if (content) onFirstToken();
+        const hasOutput = parsed.choices?.some(choice => {
+          const delta = choice.delta || {};
+          return delta.content || delta.reasoning_content || delta.reasoning || choice.text;
+        }) || parsed.delta?.text || parsed.delta?.thinking || parsed.delta?.reasoning_content
+          || parsed.content_block?.text || parsed.content_block?.thinking;
+        if (hasOutput) onFirstToken();
       } catch { /* non-JSON SSE events do not carry usage */ }
     }
   };
@@ -155,15 +158,12 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         continue;
       }
       const startedAt = Date.now();
-      let deadline = null;
       try {
         let response;
         if (account.format === 'anthropic') {
           response = await proxyAnthropic({ account, body: upstreamBody, requestedModel: model, upstreamModel, signal: request.signal });
         } else {
-          const upstream = proxyOpenAI({ account, body: upstreamBody, requestPath: url.pathname, signal: request.signal, fetch: fetchUpstream });
-          deadline = upstream.deadline;
-          response = await upstream.response;
+          response = await proxyOpenAI({ account, body: upstreamBody, requestPath: url.pathname, signal: request.signal, fetch: fetchUpstream });
         }
         const headers = responseHeaders(response.headers, {
           'X-Upstream-Account': account.name || account.id,
@@ -173,7 +173,6 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         let responseData = null;
         if (body.stream !== true) {
           responseData = await response.arrayBuffer();
-          deadline?.cleanup();
           if (response.headers.get('content-type')?.includes('application/json')) {
             try { responseUsage = JSON.parse(new TextDecoder().decode(responseData)).usage || {}; } catch { /* upstream usage is optional */ }
           }
@@ -185,7 +184,6 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
               if (firstTokenMs === null) firstTokenMs = Date.now() - requestStartedAt;
             });
             const responseBody = finalizeStream(response.body, async () => {
-              deadline?.cleanup();
               release();
               if (response.ok && !countReserved && typeof accountRepository.debitAllowance === 'function') {
                 const debit = allowanceDebit(account, upstreamModel, responseUsage);
@@ -207,11 +205,9 @@ function createProxyHandler({ accountRepository, usageRepository, fetch: fetchUp
         lastError = `[${account.name || account.id}] upstream ${response.status}`;
         if (countReserved && typeof accountRepository.refundCountAllowance === 'function') await accountRepository.refundCountAllowance(account.id);
         await response.body?.cancel().catch(() => {});
-        deadline?.cleanup();
         release();
       } catch (error) {
         if (countReserved && typeof accountRepository.refundCountAllowance === 'function') await accountRepository.refundCountAllowance(account.id);
-        deadline?.cleanup();
         release();
         lastError = `[${account.name || account.id}] ${error.message}`;
         attempts.push({ account_id: account.id, account_name: account.name, status: 0, duration_ms: Date.now() - startedAt, error: error.message });

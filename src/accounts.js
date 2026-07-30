@@ -64,7 +64,6 @@ function sanitizeAccount(input, existing = {}) {
     model_price_overrides: modelPriceOverrides,
     model_prices: modelPriceOverrides,
     max_concurrency: numberInRange(input.max_concurrency, existing.max_concurrency || 0, 0),
-    request_timeout_ms: numberInRange(input.request_timeout_ms, existing.request_timeout_ms || 120_000, 100, 900_000),
     enabled: input.enabled === undefined ? existing.enabled !== false : input.enabled !== false,
     note: String(input.note ?? existing.note ?? '').trim(),
     allowance: Object.prototype.hasOwnProperty.call(input, 'allowance')

@@ -61,6 +61,7 @@ function createSchema(db) {
       name TEXT NOT NULL,
       prefix TEXT NOT NULL UNIQUE,
       secret_hash TEXT NOT NULL UNIQUE,
+      secret_value TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       expires_at TEXT NOT NULL DEFAULT '',
       models TEXT NOT NULL DEFAULT '[]',
@@ -104,6 +105,10 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS status_checked_idx ON status_snapshots(checked_at DESC);
     CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+  const apiKeyColumns = db.prepare('PRAGMA table_info(api_keys)').all();
+  if (!apiKeyColumns.some(column => column.name === 'secret_value')) {
+    db.exec('ALTER TABLE api_keys ADD COLUMN secret_value TEXT');
+  }
 }
 
 function usageFiles(dataFile) {
